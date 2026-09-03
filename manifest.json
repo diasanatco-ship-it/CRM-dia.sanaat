@@ -1,0 +1,11 @@
+{
+  "name":"DIA Business",
+  "short_name":"DIA",
+  "lang":"fa",
+  "dir":"rtl",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#f5f6f3",
+  "theme_color":"#00695c",
+  "description":"حسابداری و مدیریت کسب‌وکار مهندسی برق"
+}
