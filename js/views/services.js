@@ -1,0 +1,11 @@
+import {DB} from '../db.js';import {money,esc,toast} from '../utils.js';
+export async function renderServices(App){
+ const rows=await DB.all('services');
+ App.setView(`<div class="page-title-row"><h1 class="page-title">خدمات</h1><button class="btn btn-primary" id="add">+ خدمت</button></div><div class="list" id="list"></div>`);
+ document.getElementById('list').innerHTML=(rows.map(x=>`<div class="list-item"><div class="list-main"><div class="list-title">${esc(x.name)}</div><div class="list-sub">${esc(x.category||'عمومی')} · واحد: ${esc(x.unit||'مورد')}</div></div><div class="list-value">${money(x.price||0)}<br><button class="btn btn-secondary edit" data-id="${x.id}">ویرایش</button></div></div>`).join('')||'<div class="empty">خدمتی ثبت نشده است.</div>');
+ document.getElementById('add').onclick=()=>form();document.querySelectorAll('.edit').forEach(b=>b.onclick=()=>form(rows.find(x=>x.id==b.dataset.id)));
+ function form(x={}){
+  const r=document.getElementById('modal-root');r.innerHTML=`<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>${x.id?'ویرایش خدمت':'خدمت جدید'}</h3><button class="close">×</button></div><form id="f" class="form-grid"><div class="field full"><label>نام خدمت</label><input name="name" required value="${esc(x.name)}"></div><div class="field"><label>دسته‌بندی</label><select name="category"><option>برق ساختمان</option><option>برق صنعتی</option><option>تابلو برق</option><option>روشنایی و نورپردازی</option><option>خدمات مهندسی</option><option>تعمیرات و عیب‌یابی</option></select></div><div class="field"><label>واحد</label><input name="unit" value="${esc(x.unit||'مورد')}"></div><div class="field"><label>قیمت پایه</label><input name="price" type="number" value="${x.price||0}"></div><div class="field full"><label>توضیحات</label><textarea name="notes">${esc(x.notes)}</textarea></div><div class="field full"><button class="btn btn-primary">ذخیره</button></div></form></div></div>`;
+  r.querySelector('.close').onclick=()=>r.innerHTML='';r.querySelector('#f').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));d.price=Number(d.price||0);if(x.id)d.id=x.id;await DB.put('services',d);r.innerHTML='';toast('خدمت ذخیره شد');renderServices(App)}
+ }
+}
