@@ -1,4 +1,4 @@
-import { route, onNavigate, startRouter, navigate } from './router.js';
+import { route,onNavigate,startRouter,navigate } from './router.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderCustomers } from './views/customers.js';
 import { renderCustomerDetail } from './views/customer-detail.js';
@@ -9,53 +9,18 @@ import { renderInvoices } from './views/invoices.js';
 import { renderAccounting } from './views/accounting.js';
 import { renderReports } from './views/reports.js';
 import { renderSettings } from './views/settings.js';
-
-const view = () => document.getElementById('view');
-const setView = html => { view().innerHTML = html; view().scrollTop = 0; };
-export const App = { view, setView };
-
-route('#/dashboard', () => renderDashboard(App));
-route('#/customers', () => renderCustomers(App));
-route('#/customers/:id', p => renderCustomerDetail(App, p));
-route('#/products', () => renderProducts(App));
-route('#/services', () => renderServices(App));
-route('#/projects', () => renderProjects(App));
-route('#/invoices', () => renderInvoices(App));
-route('#/accounting', () => renderAccounting(App));
-route('#/reports', () => renderReports(App));
-route('#/settings', () => renderSettings(App));
-route('#/more', () => App.setView(`<h1 class="page-title">بیشتر</h1><div class="more-grid">
-<a class="card more-card" href="#/services"><strong>خدمات</strong><small>خدمات برق ساختمان و صنعتی</small></a>
-<a class="card more-card" href="#/projects"><strong>پروژه‌ها</strong><small>مدیریت پروژه‌های اجرایی</small></a>
-<a class="card more-card" href="#/accounting"><strong>حسابداری</strong><small>درآمد، هزینه، دریافت و پرداخت</small></a>
-<a class="card more-card" href="#/reports"><strong>گزارش‌ها</strong><small>گزارش مالی و صورتحساب مشتری</small></a>
-<a class="card more-card" href="#/settings"><strong>تنظیمات و پشتیبان</strong><small>بکاپ و بازیابی اطلاعات</small></a>
-</div>`));
-
-// همگام‌سازی وضعیت فعال نوار پایین با مسیر جاری (بدون رفرش صفحه)
-const MORE_ROUTES = ['#/services', '#/projects', '#/accounting', '#/reports', '#/settings'];
-function syncNav(hash) {
-  const top = hash.startsWith('#/customers') ? '#/customers' : (MORE_ROUTES.some(r => hash.startsWith(r)) ? '#/more' : hash);
-  document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.route === top));
-}
+const view=()=>document.getElementById('view');
+const setView=html=>{view().innerHTML=html;window.scrollTo(0,0);};
+export const App={view,setView};
+route('#/dashboard',()=>renderDashboard(App));route('#/customers',()=>renderCustomers(App));route('#/customers/:id',p=>renderCustomerDetail(App,p));
+route('#/products',()=>renderProducts(App));route('#/services',()=>renderServices(App));route('#/projects',()=>renderProjects(App));route('#/invoices',()=>renderInvoices(App));route('#/invoices/new/:customerId',p=>renderInvoices(App,{newForCustomer:p.customerId}));
+route('#/accounting',()=>renderAccounting(App));route('#/reports',()=>renderReports(App));route('#/settings',()=>renderSettings(App));
+const MORE=['#/services','#/projects','#/accounting','#/reports','#/settings'];
+function syncNav(hash){const base=hash.split('?')[0];const active=base.startsWith('#/customers')?'#/customers':MORE.some(r=>base.startsWith(r))?'#/more':base;document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.route===active));}
 onNavigate(syncNav);
-
-document.addEventListener('click', e => {
-  const b = e.target.closest('[data-route]');
-  if (b) navigate(b.dataset.route);
-});
-
-function updateOnlineIndicator() {
-  const el = document.getElementById('online-indicator');
-  if (!el) return;
-  el.textContent = navigator.onLine ? 'آنلاین' : 'آفلاین';
-  el.className = 'online-indicator ' + (navigator.onLine ? 'is-online' : 'is-offline');
-}
-window.addEventListener('online', updateOnlineIndicator);
-window.addEventListener('offline', updateOnlineIndicator);
-
-document.addEventListener('DOMContentLoaded', () => {
-  startRouter();
-  updateOnlineIndicator();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
-});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-route]');if(b){e.preventDefault();navigate(b.dataset.route);return;}const more=e.target.closest('[data-more]');if(more){e.preventDefault();openMoreSheet();}});
+function openMoreSheet(){const root=document.getElementById('modal-root');root.innerHTML=`<div class="sheet-backdrop" data-sheet-close><section class="bottom-sheet" role="dialog" aria-modal="true" aria-label="بیشتر"><div class="sheet-handle"></div><div class="sheet-title">بیشتر</div><div class="sheet-grid">${[['#/services','briefcase','خدمات','برق ساختمان و صنعتی'],['#/projects','folder','پروژه‌ها','مدیریت پروژه'],['#/accounting','wallet','حسابداری','درآمد و هزینه'],['#/reports','chart','گزارش‌ها','گزارش‌های مالی'],['#/settings','settings','تنظیمات','پشتیبان و تنظیمات']].map(x=>`<button class="sheet-item" data-route="${x[0]}">${iconName(x[1])}<span><b>${x[2]}</b><small>${x[3]}</small></span></button>`).join('')}</div></section></div>`;root.querySelector('[data-sheet-close]').addEventListener('click',e=>{if(e.target===e.currentTarget)root.innerHTML='';});root.querySelectorAll('[data-route]').forEach(b=>b.addEventListener('click',()=>root.innerHTML=''));}
+function iconName(n){return `<img class="icon icon-lg" src="./assets/icons/${n}.svg" alt="" aria-hidden="true">`;}
+function online(){const e=document.getElementById('online-indicator');if(!e)return;e.textContent=navigator.onLine?'آنلاین':'آفلاین';e.className='online-indicator '+(navigator.onLine?'is-online':'is-offline');}
+window.addEventListener('online',online);window.addEventListener('offline',online);
+document.addEventListener('DOMContentLoaded',()=>{startRouter();online();if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});});

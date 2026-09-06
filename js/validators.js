@@ -73,7 +73,7 @@ export function validateString(value, fieldName, options = {}) {
 export function validateNumber(value, fieldName, options = {}) {
   const { required = false, min, max, allowZero = true } = options;
   if (isEmpty(value)) return required ? fail(fieldName, `${labelFa(fieldName)} الزامی است`) : ok();
-  const n = Number(normalizeDigits(String(value)));
+  const n = Number(normalizeAmountInput(value));
   if (!isFinite(n) || isNaN(n)) return fail(fieldName, `${labelFa(fieldName)} باید یک عدد معتبر باشد`);
   if (!allowZero && n === 0) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند صفر باشد`);
   if (min !== undefined && n < min) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند کمتر از ${min} باشد`);
@@ -85,7 +85,7 @@ export function validateInteger(value, fieldName, options = {}) {
   const base = validateNumber(value, fieldName, options);
   if (!base.valid) return base;
   if (isEmpty(value)) return base;
-  const n = Number(normalizeDigits(String(value)));
+  const n = Number(normalizeAmountInput(value));
   if (!Number.isInteger(n)) return fail(fieldName, `${labelFa(fieldName)} باید عدد صحیح باشد`);
   return ok();
 }
@@ -153,7 +153,7 @@ export function isValidId(value) {
 
 // برچسب فارسی نام فیلدها برای پیام خطا؛ اگر نام‌آشنا نبود همان مقدار برگردانده می‌شود.
 const FIELD_LABELS = {
-  name: 'نام', customerName: 'نام مشتری', companyName: 'نام شرکت', phone: 'شماره تماس', email: 'ایمیل',
+  name: 'نام', customerName: 'نام مشتری', companyName: 'نام شرکت', phone: 'شماره تماس', mobile: 'موبایل', email: 'ایمیل',
   address: 'آدرس', customerCode: 'کد مشتری', notes: 'توضیحات', code: 'کد', category: 'دسته‌بندی', unit: 'واحد',
   purchasePrice: 'قیمت خرید', salePrice: 'قیمت فروش', stock: 'موجودی', minStock: 'حداقل موجودی', price: 'قیمت',
   description: 'شرح', budget: 'بودجه', startDate: 'تاریخ شروع', endDate: 'تاریخ پایان', status: 'وضعیت',
@@ -186,7 +186,7 @@ export function validateCustomer(data = {}) {
   return collectErrors([
     () => validateString(data.name, 'name', { required: true, maxLength: 120 }),
     () => validateString(data.companyName, 'companyName', { maxLength: 150 }),
-    () => validatePhone(data.phone, 'phone'),
+    () => validatePhone(data.phone ?? data.mobile, data.phone !== undefined ? 'phone' : 'mobile'),
     () => validateEmail(data.email, 'email'),
     () => validateString(data.address, 'address', { maxLength: 500 }),
     () => validateString(data.customerCode, 'customerCode', { maxLength: 30 }),
@@ -306,8 +306,9 @@ export function validateSettings(data = {}) {
   if (!bnRes.valid) errors.push(...bnRes.errors);
   const phoneRes = validatePhone(data.phone, 'phone'); if (!phoneRes.valid) errors.push(...phoneRes.errors);
   const emailRes = validateEmail(data.email, 'email'); if (!emailRes.valid) errors.push(...emailRes.errors);
-  if (!isEmpty(data.invoiceStartNumber)) {
-    const r = validateInteger(data.invoiceStartNumber, 'invoiceStartNumber', { min: 1 });
+  const invoiceStart = data.invoiceStartNumber ?? data.invoiceStart;
+  if (!isEmpty(invoiceStart)) {
+    const r = validateInteger(invoiceStart, 'invoiceStartNumber', { min: 1 });
     if (!r.valid) errors.push({ field: 'invoiceStartNumber', message: 'شماره شروع فاکتور باید عدد صحیح مثبت باشد' });
   }
   if (!isEmpty(data.taxRate)) {
@@ -316,6 +317,6 @@ export function validateSettings(data = {}) {
   }
   if (data.taxEnabled !== undefined && typeof data.taxEnabled !== 'boolean') errors.push({ field: 'taxEnabled', message: 'وضعیت فعال‌بودن مالیات نامعتبر است' });
   const currRes = validateString(data.currency, 'currency', { maxLength: 20 }); if (!currRes.valid) errors.push(...currRes.errors);
-  const notesRes = validateString(data.invoiceNotes, 'invoiceNotes', { maxLength: 500 }); if (!notesRes.valid) errors.push(...notesRes.errors);
+  const notesRes = validateString(data.invoiceNotes ?? data.invoiceNote, 'invoiceNotes', { maxLength: 500 }); if (!notesRes.valid) errors.push(...notesRes.errors);
   return { valid: errors.length === 0, errors };
 }
