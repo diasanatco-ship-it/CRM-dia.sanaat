@@ -1,1 +1,26 @@
-body{background:#fff!important}.app-header,.bottom-nav,#modal-root,#toast-root,.no-print,.page-title-row{display:none!important}.view{max-width:none;padding:0}.invoice-box{border:0;box-shadow:none;border-radius:0;padding:0}.invoice-table th,.invoice-table td{font-size:10pt}
+/* print.css — فقط محتوای فاکتور/صورتحساب چاپ شود، بدون هدر و ناوبری اپ */
+@page { size: A4; margin: 14mm; }
+html, body { background: #fff !important; }
+
+.app-header, .bottom-nav, #toast-root, .no-print { display: none !important; }
+
+/* حالت پیش‌فرض (بدون کلاس چاپ اختصاصی): همه چیز به‌جز chrome برنامه چاپ می‌شود */
+.view { max-width: none !important; padding: 0 !important; margin: 0 !important; }
+.modal-backdrop { position: static !important; background: none !important; inset: auto; }
+.modal { position: static !important; width: 100% !important; max-height: none !important; overflow: visible !important; padding: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: #fff !important; }
+.invoice-box, #statement { border: 0; box-shadow: none; border-radius: 0; padding: 0; background: #fff !important; }
+.invoice-table th, .invoice-table td, table th, table td { font-size: 10pt; }
+.card { box-shadow: none !important; border: 1px solid #999 !important; }
+
+/* حالت اختصاصی: فقط فاکتور داخل مودال چاپ شود (modal-root هم‌سطح app است، نه داخل آن) */
+body.printing-invoice > #app,
+body.printing-invoice > #toast-root,
+body.printing-invoice #modal-root .modal-head { display: none !important; }
+body.printing-invoice > #modal-root { display: block !important; position: static !important; }
+
+/* حالت اختصاصی: فقط صورتحساب مشتری (داخل #view اصلی) چاپ شود */
+body.printing-statement > #modal-root,
+body.printing-statement > #toast-root,
+body.printing-statement .app-header,
+body.printing-statement .bottom-nav { display: none !important; }
+body.printing-statement .page-title-row .btn { display: none !important; }
