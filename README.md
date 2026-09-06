@@ -1,4 +1,4 @@
-# DIA Business V2
+# DIA Business V2.2
 
 حسابداری و مدیریت کسب‌وکار مهندسی برق؛ Mobile First، SPA، Vanilla JS، IndexedDB و Offline/PWA.
 
