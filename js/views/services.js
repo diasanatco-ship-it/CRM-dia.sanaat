@@ -1,36 +1,5 @@
-import { DB } from '../db.js';
-import { money, esc, toast } from '../utils.js';
-import { validateService } from '../validators.js';
-
-const CATEGORIES = ['برق ساختمان', 'برق صنعتی', 'تابلو برق', 'روشنایی و نورپردازی', 'خدمات مهندسی', 'تعمیرات و عیب‌یابی'];
-
-export async function renderServices(App) {
-  const rows = await DB.all('services');
-  App.setView(`<div class="page-title-row"><h1 class="page-title">خدمات</h1><button class="btn btn-primary" id="add">+ خدمت</button></div><div class="list" id="list"></div>`);
-  document.getElementById('list').innerHTML = (rows.map(x => `<div class="list-item"><div class="list-main"><div class="list-title">${esc(x.name)}</div><div class="list-sub">${esc(x.category || 'عمومی')} · واحد: ${esc(x.unit || 'مورد')}</div></div><div class="list-value">${money(x.price || 0)}<div class="btn-row"><button class="btn btn-secondary edit" data-id="${x.id}">ویرایش</button><button class="btn btn-danger del" data-id="${x.id}">حذف</button></div></div></div>`).join('') || '<div class="empty">خدمتی ثبت نشده است.</div>');
-  document.getElementById('add').onclick = () => form();
-  document.querySelectorAll('.edit').forEach(b => b.onclick = () => form(rows.find(x => x.id == b.dataset.id)));
-  document.querySelectorAll('.del').forEach(b => b.onclick = async () => { if (confirm('این خدمت حذف شود؟')) { await DB.delete('services', Number(b.dataset.id)); toast('خدمت حذف شد'); renderServices(App); } });
-
-  function form(x = {}) {
-    const r = document.getElementById('modal-root');
-    r.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>${x.id ? 'ویرایش خدمت' : 'خدمت جدید'}</h3><button class="close">×</button></div><form id="f" class="form-grid" novalidate>
-    <div class="field full"><label>نام خدمت</label><input name="name" required value="${esc(x.name)}"></div>
-    <div class="field"><label>دسته‌بندی</label><select name="category">${CATEGORIES.map(c => `<option ${x.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
-    <div class="field"><label>واحد</label><input name="unit" value="${esc(x.unit || 'مورد')}"></div>
-    <div class="field"><label>قیمت پایه</label><input name="price" type="number" min="0" value="${x.price || 0}"></div>
-    <div class="field full"><label>توضیحات</label><textarea name="description">${esc(x.description)}</textarea></div>
-    <div class="field full"><button class="btn btn-primary">ذخیره</button></div></form></div></div>`;
-    r.querySelector('.close').onclick = () => r.innerHTML = '';
-    r.querySelector('#f').onsubmit = async e => {
-      e.preventDefault();
-      const d = Object.fromEntries(new FormData(e.target));
-      const result = validateService(d);
-      if (!result.valid) { toast(result.errors[0].message, 'error'); return; }
-      d.price = Number(d.price || 0);
-      if (x.id) d.id = x.id;
-      await DB.put('services', d);
-      r.innerHTML = ''; toast('خدمت ذخیره شد'); renderServices(App);
-    };
-  }
+import {DB} from '../db.js';import {money,esc,toast,icon,showValidationErrors} from '../utils.js';import {validateService} from '../validators.js';import {pageHeader,emptyState,actionMenu,openModal,closeModal,bindActionMenus} from '../components.js';
+const CATEGORIES=['برق ساختمان','برق صنعتی','تابلو برق','روشنایی و نورپردازی','خدمات مهندسی','تعمیرات و عیب‌یابی'];
+export async function renderServices(App){const rows=await DB.all('services');App.setView(`${pageHeader('خدمات',{action:'خدمت جدید',actionId:'add'})}<div id="list" class="list"><div class="skeleton"></div><div class="skeleton"></div></div>`);const list=document.getElementById('list');list.innerHTML=rows.map(x=>`<div class="list-item"><div class="list-main"><div class="list-title">${esc(x.name)}</div><div class="list-sub">${esc(x.category||'عمومی')} · واحد ${esc(x.unit||'مورد')}</div></div><div class="list-value">${money(x.price||0)}</div>${actionMenu(x.id)}</div>`).join('')||emptyState('خدمتی ثبت نشده','خدمات برق ساختمان و صنعتی را اضافه کنید.','افزودن خدمت','add-empty');bindActionMenus(list,{edit:id=>form(rows.find(x=>x.id==id)),delete:async id=>{if(confirm('این خدمت حذف شود؟')){await DB.delete('services',Number(id));toast('خدمت حذف شد');renderServices(App);}}});list.querySelector('#add-empty')?.addEventListener('click',()=>form());document.getElementById('add').onclick=()=>form();
+ function form(x={}){const m=openModal(`<div class="modal-head"><h3>${x.id?'ویرایش خدمت':'خدمت جدید'}</h3><button class="close">${icon('x','')}</button></div><form id="f" class="form-grid" novalidate><div class="field full"><label>نام خدمت</label><input name="name" autofocus value="${esc(x.name||'')}"></div><div class="field"><label>قیمت پایه</label><input name="price" type="text" inputmode="decimal" value="${x.price||0}"></div><div class="field"><label>واحد</label><input name="unit" value="${esc(x.unit||'مورد')}"></div><div class="field full"><label>دسته‌بندی</label><select name="category">${CATEGORIES.map(c=>`<option value="${esc(c)}" ${x.category===c?'selected':''}>${c}</option>`).join('')}</select></div><div class="field full"><label>توضیحات</label><textarea name="description">${esc(x.description||'')}</textarea></div><div class="field full"><div class="btn-row"><button class="btn btn-primary" name="saveMode" value="close">ذخیره و بستن</button><button class="btn btn-secondary" name="saveMode" value="next" type="submit">ذخیره و افزودن بعدی</button></div></div></form>`);const f=m.querySelector('#f');f.onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(f));const v=validateService(d);if(showValidationErrors(f,v))return;d.price=Number(d.price||0);if(x.id)d.id=x.id;await DB.put('services',d);if(e.submitter?.value==='next'&&!x.id){toast('خدمت ذخیره شد');f.reset();f.name.focus();}else{closeModal();toast('خدمت ذخیره شد');renderServices(App);}};}
 }

@@ -1,65 +1,11 @@
-import { DB } from '../db.js';
-import { money, esc, toast } from '../utils.js';
-import { validateCustomer } from '../validators.js';
-import { navigate } from '../router.js';
-
-export async function renderCustomers(App) {
-  const [customers, invoices] = await Promise.all([DB.all('customers'), DB.all('invoices')]);
-  const balanceOf = id => invoices.filter(i => i.customerId === id && i.status !== 'cancelled').reduce((s, i) => s + ((i.total || 0) - (i.paidAmount || 0)), 0);
-
-  App.setView(`<div class="page-title-row"><h1 class="page-title">مشتریان</h1><button class="btn btn-primary" id="add-customer">+ مشتری</button></div>
-  <div class="search"><span>⌕</span><input id="customer-search" placeholder="جستجوی مشتری..."></div>
-  <div id="customer-list" class="list"></div>`);
-
-  const draw = filter => {
-    const f = (filter || '').trim();
-    const filtered = customers.filter(c => (c.name + ' ' + (c.mobile || '') + ' ' + (c.customerCode || '')).includes(f));
-    document.getElementById('customer-list').innerHTML = filtered.map(c => {
-      const bal = balanceOf(c.id);
-      return `<div class="list-item"><div class="list-main clickable" data-open="${c.id}"><div class="list-title">${esc(c.name)}</div><div class="list-sub">${esc(c.customerCode || '—')} · ${esc(c.mobile || 'بدون شماره')} · ${esc(c.type || 'حقیقی')}</div></div>
-      <div class="list-value"><span class="${bal > 0 ? 'red' : (bal < 0 ? 'green' : '')}">${bal !== 0 ? money(Math.abs(bal)) : '—'}</span><br><small class="stat-meta">${bal > 0 ? 'بدهکار' : (bal < 0 ? 'بستانکار' : 'تسویه')}</small>
-      <div class="btn-row"><button class="btn btn-secondary edit-c" data-id="${c.id}">ویرایش</button><button class="btn btn-danger del-c" data-id="${c.id}">حذف</button></div></div></div>`;
-    }).join('') || '<div class="empty">مشتری‌ای پیدا نشد.</div>';
-    document.querySelectorAll('[data-open]').forEach(el => el.onclick = () => navigate('#/customers/' + el.dataset.open));
-    document.querySelectorAll('.edit-c').forEach(b => b.onclick = e => { e.stopPropagation(); form(customers.find(c => c.id == b.dataset.id)); });
-    document.querySelectorAll('.del-c').forEach(b => b.onclick = async e => {
-      e.stopPropagation();
-      const id = Number(b.dataset.id);
-      const hasInvoices = invoices.some(i => i.customerId === id);
-      const msg = hasInvoices ? 'این مشتری دارای فاکتور ثبت‌شده است. حذف مشتری، فاکتورهای او را تغییر نمی‌دهد اما ارتباط آن‌ها از دست می‌رود. آیا مطمئن هستید؟' : 'آیا از حذف این مشتری مطمئن هستید؟';
-      if (confirm(msg)) { await DB.delete('customers', id); toast('مشتری حذف شد'); renderCustomers(App); }
-    });
-  };
-  draw('');
-  document.getElementById('customer-search').oninput = e => draw(e.target.value);
-  document.getElementById('add-customer').onclick = () => form();
-
-  function nextCode() {
-    const nums = customers.map(c => Number(String(c.customerCode || '').replace(/\D/g, '')) || 0);
-    return 'C-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, '0');
-  }
-
-  function form(c = {}) {
-    const r = document.getElementById('modal-root');
-    r.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><h3>${c.id ? 'ویرایش مشتری' : 'مشتری جدید'}</h3><button class="close no-print">×</button></div>
-    <form id="customer-form" class="form-grid" novalidate>
-      <div class="field"><label>نام / نام شرکت</label><input name="name" required value="${esc(c.name)}"></div>
-      <div class="field"><label>کد مشتری</label><input name="customerCode" value="${esc(c.customerCode || (c.id ? '' : nextCode()))}"></div>
-      <div class="field"><label>موبایل</label><input name="mobile" inputmode="tel" value="${esc(c.mobile)}"></div>
-      <div class="field"><label>نوع</label><select name="type"><option ${c.type === 'حقیقی' || !c.type ? 'selected' : ''}>حقیقی</option><option ${c.type === 'حقوقی' ? 'selected' : ''}>حقوقی</option></select></div>
-      <div class="field full"><label>آدرس</label><textarea name="address">${esc(c.address)}</textarea></div>
-      <div class="field full"><label>توضیحات</label><textarea name="notes">${esc(c.notes)}</textarea></div>
-      <div class="field full"><button class="btn btn-primary" type="submit">ذخیره</button></div>
-    </form></div></div>`;
-    r.querySelector('.close').onclick = () => r.innerHTML = '';
-    r.querySelector('#customer-form').onsubmit = async e => {
-      e.preventDefault();
-      const d = Object.fromEntries(new FormData(e.target));
-      const result = validateCustomer(d);
-      if (!result.valid) { toast(result.errors[0].message, 'error'); return; }
-      if (c.id) d.id = c.id;
-      await DB.put('customers', d);
-      r.innerHTML = ''; toast('مشتری ذخیره شد'); renderCustomers(App);
-    };
-  }
+import {DB} from '../db.js';import {money,esc,toast,icon,showValidationErrors} from '../utils.js';import {validateCustomer} from '../validators.js';import {navigate} from '../router.js';import {pageHeader,emptyState,actionMenu,openModal,closeModal,bindActionMenus} from '../components.js';
+export async function renderCustomers(App){
+ const [customers,invoices]=await Promise.all([DB.all('customers'),DB.all('invoices')]);
+ const balanceOf=id=>invoices.filter(i=>i.customerId===id&&i.status!=='cancelled').reduce((s,i)=>s+(i.total||0)-(i.paidAmount||0),0);
+ App.setView(`${pageHeader('مشتریان',{action:'مشتری جدید',actionId:'add-customer'})}<div class="search"><img class="icon" src="./assets/icons/search.svg" alt=""><input id="customer-search" placeholder="جستجوی نام، موبایل یا کد مشتری" autocomplete="off"></div><div id="customer-list" class="list">${'<div class="skeleton"></div>'.repeat(3)}</div>`);
+ const list=document.getElementById('customer-list');
+ const draw=f=>{const q=(f||'').trim().toLocaleLowerCase('fa-IR');const filtered=customers.filter(c=>(`${c.name} ${c.mobile||''} ${c.customerCode||''}`).toLocaleLowerCase('fa-IR').includes(q));list.innerHTML=filtered.map(c=>{const bal=balanceOf(c.id);return `<div class="list-item"><div class="list-main clickable" data-open="${c.id}"><div class="list-title">${esc(c.name)}</div><div class="list-sub">${esc(c.customerCode||'—')} · ${esc(c.mobile||'بدون شماره')} · ${esc(c.type||'حقیقی')}</div></div><div class="list-value"><span class="${bal>0?'red':bal<0?'green':''}">${bal?money(Math.abs(bal)):'—'}</span><br><small class="stat-meta">${bal>0?'بدهکار':bal<0?'بستانکار':'تسویه'}</small></div>${actionMenu(c.id)}</div>`}).join('')||emptyState('مشتری‌ای پیدا نشد','برای شروع یک مشتری جدید اضافه کنید.','افزودن مشتری','add-empty');bindActionMenus(list,{edit:id=>form(customers.find(c=>c.id==id)),delete:async id=>{const has=invoices.some(i=>i.customerId==id);if(confirm(has?'این مشتری فاکتور دارد. حذف فقط ارتباط مشتری را حذف می‌کند. ادامه؟':'مشتری حذف شود؟')){await DB.delete('customers',Number(id));toast('مشتری حذف شد');renderCustomers(App);}}});list.querySelectorAll('[data-open]').forEach(x=>x.onclick=()=>navigate('#/customers/'+x.dataset.open));list.querySelector('#add-empty')?.addEventListener('click',()=>form());};
+ draw('');document.getElementById('customer-search').oninput=e=>draw(e.target.value);document.getElementById('add-customer').onclick=()=>form();
+ function nextCode(){const n=customers.map(c=>Number(String(c.customerCode||'').replace(/\D/g,''))||0);return 'C-'+String((n.length?Math.max(...n):0)+1).padStart(4,'0');}
+ function form(c={}){const m=openModal(`<div class="modal-head"><h3>${c.id?'ویرایش مشتری':'مشتری جدید'}</h3><button class="close" aria-label="بستن">${icon('x','')}</button></div><form id="customer-form" class="form-grid" novalidate><div class="field full"><label>نام / نام شرکت</label><input name="name" autofocus value="${esc(c.name||'')}"></div><div class="field"><label>کد مشتری</label><input name="customerCode" value="${esc(c.customerCode||(c.id?'':nextCode()))}"></div><div class="field"><label>موبایل</label><input name="mobile" inputmode="tel" value="${esc(c.mobile||'')}"></div><div class="field"><label>نوع</label><select name="type"><option value="حقیقی" ${!c.type||c.type==='حقیقی'?'selected':''}>حقیقی</option><option value="حقوقی" ${c.type==='حقوقی'?'selected':''}>حقوقی</option></select></div><div class="field full"><label>آدرس</label><textarea name="address">${esc(c.address||'')}</textarea></div><div class="field full"><label>توضیحات</label><textarea name="notes">${esc(c.notes||'')}</textarea></div><div class="field full"><button class="btn btn-primary btn-block">${icon('check','')}ذخیره</button></div></form>`);const f=m.querySelector('form');f.onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(f));const v=validateCustomer(d);if(showValidationErrors(f,v))return;if(c.id)d.id=c.id;await DB.put('customers',d);closeModal();toast('مشتری ذخیره شد');renderCustomers(App);};}
 }
