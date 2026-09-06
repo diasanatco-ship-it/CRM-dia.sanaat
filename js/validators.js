@@ -1,0 +1,321 @@
+// validators.js — لایه اعتبارسنجی خالص (بدون DOM، بدون IndexedDB، بدون UI)
+// این فایل تنها داده دریافت می‌کند و نتیجه ساختاریافته برمی‌گرداند. هیچ استثنایی برای ورودی نامعتبر کاربر پرتاب نمی‌شود.
+
+// ============================================================
+// 1) نرمال‌سازی
+// ============================================================
+
+// اعداد فارسی/عربی را به اعداد انگلیسی تبدیل می‌کند؛ ورودی اصلی را تغییر نمی‌دهد.
+export function normalizeDigits(value) {
+  if (value === null || value === undefined) return value;
+  const fa = '۰۱۲۳۴۵۶۷۸۹', ar = '٠١٢٣٤٥٦٧٨٩';
+  return String(value).replace(/[۰-۹٠-٩]/g, ch => {
+    const fi = fa.indexOf(ch); if (fi > -1) return String(fi);
+    const ai = ar.indexOf(ch); if (ai > -1) return String(ai);
+    return ch;
+  });
+}
+
+// رشته مبلغ فرمت‌شده (با جداکننده هزارگان فارسی/انگلیسی) را به رشته عددی خام تبدیل می‌کند.
+export function normalizeAmountInput(value) {
+  if (value === null || value === undefined) return '';
+  let s = normalizeDigits(String(value)).trim();
+  s = s.replace(/[,\u066C\u060C\s]/g, ''); // کاما، جداکننده هزارگان فارسی/عربی، فاصله
+  return s;
+}
+
+function isEmpty(value) {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  return false;
+}
+
+// ============================================================
+// 2) کمک‌های ترکیب نتایج
+// ============================================================
+
+export function ok() { return { valid: true, errors: [] }; }
+export function fail(field, message) { return { valid: false, errors: [{ field, message }] }; }
+
+// چند نتیجه {valid,errors} را در یک نتیجه واحد جمع می‌کند (همه خطاها حفظ می‌شوند).
+export function mergeValidationResults(...results) {
+  const errors = results.flatMap(r => (r && r.errors) || []);
+  return { valid: errors.length === 0, errors };
+}
+// اجرای پشت‌سرهم چند تابع اعتبارسنج و جمع‌آوری همه خطاها (توقف نمی‌کند).
+export function collectErrors(fns) {
+  const errors = [];
+  for (const fn of fns) {
+    const r = fn();
+    if (r && r.errors && r.errors.length) errors.push(...r.errors);
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ============================================================
+// 3) اعتبارسنج‌های پایه
+// ============================================================
+
+export function validateRequired(value, fieldName) {
+  if (isEmpty(value)) return fail(fieldName, `${labelFa(fieldName)} الزامی است`);
+  return ok();
+}
+
+export function validateString(value, fieldName, options = {}) {
+  const { required = false, maxLength = 500, minLength = 0 } = options;
+  if (isEmpty(value)) return required ? fail(fieldName, `${labelFa(fieldName)} الزامی است`) : ok();
+  const s = String(value);
+  if (s.length < minLength) return fail(fieldName, `${labelFa(fieldName)} خیلی کوتاه است`);
+  if (s.length > maxLength) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند بیشتر از ${maxLength} کاراکتر باشد`);
+  return ok();
+}
+
+export function validateNumber(value, fieldName, options = {}) {
+  const { required = false, min, max, allowZero = true } = options;
+  if (isEmpty(value)) return required ? fail(fieldName, `${labelFa(fieldName)} الزامی است`) : ok();
+  const n = Number(normalizeDigits(String(value)));
+  if (!isFinite(n) || isNaN(n)) return fail(fieldName, `${labelFa(fieldName)} باید یک عدد معتبر باشد`);
+  if (!allowZero && n === 0) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند صفر باشد`);
+  if (min !== undefined && n < min) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند کمتر از ${min} باشد`);
+  if (max !== undefined && n > max) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند بیشتر از ${max} باشد`);
+  return ok();
+}
+
+export function validateInteger(value, fieldName, options = {}) {
+  const base = validateNumber(value, fieldName, options);
+  if (!base.valid) return base;
+  if (isEmpty(value)) return base;
+  const n = Number(normalizeDigits(String(value)));
+  if (!Number.isInteger(n)) return fail(fieldName, `${labelFa(fieldName)} باید عدد صحیح باشد`);
+  return ok();
+}
+
+// مبلغ: می‌تواند رشته فرمت‌شده با جداکننده هزارگان یا اعداد فارسی باشد.
+export function validateAmount(value, fieldName, options = {}) {
+  const { required = false, allowZero = true, max } = options;
+  if (isEmpty(value)) return required ? fail(fieldName, `${labelFa(fieldName)} الزامی است`) : ok();
+  const raw = normalizeAmountInput(value);
+  if (raw === '' || raw === '-') return fail(fieldName, `${labelFa(fieldName)} باید یک عدد معتبر باشد`);
+  const n = Number(raw);
+  if (isNaN(n) || !isFinite(n)) return fail(fieldName, `${labelFa(fieldName)} باید یک عدد معتبر باشد`);
+  if (n < 0) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند منفی باشد`);
+  if (!allowZero && n === 0) return fail(fieldName, `${labelFa(fieldName)} باید بزرگ‌تر از صفر باشد`);
+  if (max !== undefined && n > max) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند بیشتر از ${max} باشد`);
+  return ok();
+}
+
+// شماره موبایل ایران: 09xxxxxxxxx / +989xxxxxxxxx / 00989xxxxxxxxx
+export function validatePhone(value, fieldName) {
+  if (isEmpty(value)) return ok();
+  let s = normalizeDigits(String(value)).replace(/[\s\-()]/g, '');
+  if (s.startsWith('+98')) s = '0' + s.slice(3);
+  else if (s.startsWith('0098')) s = '0' + s.slice(4);
+  else if (s.startsWith('98') && s.length === 12) s = '0' + s.slice(2);
+  if (!/^09\d{9}$/.test(s)) return fail(fieldName, 'شماره تماس معتبر نیست');
+  return ok();
+}
+
+export function validateEmail(value, fieldName) {
+  if (isEmpty(value)) return ok();
+  const s = String(value).trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return fail(fieldName, 'ایمیل معتبر نیست');
+  return ok();
+}
+
+// value می‌تواند timestamp، ISO string یا رشته قابل‌قبول برای new Date باشد.
+export function isValidDate(value) {
+  if (isEmpty(value)) return false;
+  const d = value instanceof Date ? value : new Date(value);
+  return !isNaN(d.getTime());
+}
+// بررسی سطحی قالب تاریخ شمسی نمایشی مثل 1405/06/13 (بدون کتابخانه تقویم)
+export function isValidPersianDate(value) {
+  if (isEmpty(value)) return false;
+  const s = normalizeDigits(String(value)).trim();
+  const m = s.match(/^(1[23]\d{2})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+  if (!m) return false;
+  const month = Number(m[2]), day = Number(m[3]);
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+export function validateDate(value, fieldName, options = {}) {
+  const { required = false } = options;
+  if (isEmpty(value)) return required ? fail(fieldName, `${labelFa(fieldName)} الزامی است`) : ok();
+  if (!isValidDate(value)) return fail(fieldName, `${labelFa(fieldName)} معتبر نیست`);
+  return ok();
+}
+
+// شناسه‌ها در این پروژه توسط IndexedDB (autoIncrement) یا uid() تولید می‌شوند؛ نیازی به UUID نیست.
+export function isValidId(value) {
+  if (value === null || value === undefined || value === '') return false;
+  return typeof value === 'number' ? isFinite(value) : /^[A-Za-z0-9_-]+$/.test(String(value));
+}
+
+// برچسب فارسی نام فیلدها برای پیام خطا؛ اگر نام‌آشنا نبود همان مقدار برگردانده می‌شود.
+const FIELD_LABELS = {
+  name: 'نام', customerName: 'نام مشتری', companyName: 'نام شرکت', phone: 'شماره تماس', email: 'ایمیل',
+  address: 'آدرس', customerCode: 'کد مشتری', notes: 'توضیحات', code: 'کد', category: 'دسته‌بندی', unit: 'واحد',
+  purchasePrice: 'قیمت خرید', salePrice: 'قیمت فروش', stock: 'موجودی', minStock: 'حداقل موجودی', price: 'قیمت',
+  description: 'شرح', budget: 'بودجه', startDate: 'تاریخ شروع', endDate: 'تاریخ پایان', status: 'وضعیت',
+  customerId: 'مشتری', invoiceNumber: 'شماره فاکتور', date: 'تاریخ', items: 'اقلام فاکتور', discount: 'تخفیف',
+  tax: 'مالیات', paidAmount: 'مبلغ پرداختی', type: 'نوع', itemId: 'کالا/خدمت', quantity: 'تعداد', unitPrice: 'قیمت واحد',
+  amount: 'مبلغ', businessName: 'نام کسب‌وکار', ownerName: 'نام صاحب کسب‌وکار', invoicePrefix: 'پیشوند فاکتور',
+  invoiceStartNumber: 'شماره شروع فاکتور', currency: 'واحد پول', taxRate: 'درصد مالیات', invoiceNotes: 'توضیحات فاکتور'
+};
+function labelFa(field) { return FIELD_LABELS[field] || field; }
+
+// ============================================================
+// 4) وضعیت‌های مرکزی (فقط کد؛ ترجمه فارسی در لایه UI انجام می‌شود)
+// ============================================================
+
+export const CUSTOMER_STATUS = ['active', 'inactive'];
+export const PROJECT_STATUS = ['planned', 'active', 'completed', 'cancelled'];
+export const INVOICE_STATUS = ['draft', 'issued', 'partially_paid', 'paid', 'cancelled'];
+export const TRANSACTION_TYPES = ['income', 'expense', 'customer_payment', 'supplier_payment', 'other_expense'];
+
+export const isValidProjectStatus = s => PROJECT_STATUS.includes(s);
+export const isValidInvoiceStatus = s => INVOICE_STATUS.includes(s);
+export const isValidTransactionType = t => TRANSACTION_TYPES.includes(t);
+export const isValidCustomerStatus = s => CUSTOMER_STATUS.includes(s);
+
+// ============================================================
+// 5) اعتبارسنج‌های سطح موجودیت (entity-level)
+// ============================================================
+
+export function validateCustomer(data = {}) {
+  return collectErrors([
+    () => validateString(data.name, 'name', { required: true, maxLength: 120 }),
+    () => validateString(data.companyName, 'companyName', { maxLength: 150 }),
+    () => validatePhone(data.phone, 'phone'),
+    () => validateEmail(data.email, 'email'),
+    () => validateString(data.address, 'address', { maxLength: 500 }),
+    () => validateString(data.customerCode, 'customerCode', { maxLength: 30 }),
+    () => validateString(data.notes, 'notes', { maxLength: 1000 }),
+    () => (data.status ? (isValidCustomerStatus(data.status) ? ok() : fail('status', 'وضعیت مشتری معتبر نیست')) : ok())
+  ]);
+}
+
+export function validateProduct(data = {}) {
+  return collectErrors([
+    () => validateString(data.name, 'name', { required: true, maxLength: 150 }),
+    () => validateString(data.code, 'code', { maxLength: 40 }),
+    () => validateString(data.category, 'category', { maxLength: 80 }),
+    () => validateString(data.unit, 'unit', { maxLength: 20 }),
+    () => validateAmount(data.purchasePrice, 'purchasePrice'),
+    () => validateAmount(data.salePrice, 'salePrice'),
+    () => validateNumber(data.stock, 'stock', { min: 0 }),
+    () => validateNumber(data.minStock, 'minStock', { min: 0 })
+  ]);
+}
+
+export function validateService(data = {}) {
+  return collectErrors([
+    () => validateString(data.name, 'name', { required: true, maxLength: 150 }),
+    () => validateString(data.code, 'code', { maxLength: 40 }),
+    () => validateString(data.unit, 'unit', { maxLength: 20 }),
+    () => validateAmount(data.price, 'price'),
+    () => validateString(data.description, 'description', { maxLength: 1000 })
+  ]);
+}
+
+export function validateProject(data = {}) {
+  const errs = collectErrors([
+    () => validateString(data.name, 'name', { required: true, maxLength: 150 }),
+    () => (isEmpty(data.customerId) ? ok() : (isValidId(data.customerId) ? ok() : fail('customerId', 'مشتری انتخاب‌شده معتبر نیست'))),
+    () => validateAmount(data.budget, 'budget'),
+    () => (data.status ? (isValidProjectStatus(data.status) ? ok() : fail('status', 'وضعیت پروژه معتبر نیست')) : ok()),
+    () => validateDate(data.startDate, 'startDate'),
+    () => validateDate(data.endDate, 'endDate')
+  ]);
+  const extra = [];
+  if (!isEmpty(data.startDate) && !isEmpty(data.endDate) && isValidDate(data.startDate) && isValidDate(data.endDate)) {
+    if (new Date(data.endDate).getTime() < new Date(data.startDate).getTime()) {
+      extra.push({ field: 'endDate', message: 'تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد' });
+    }
+  }
+  return mergeValidationResults(errs, { valid: extra.length === 0, errors: extra });
+}
+
+export function validateInvoiceItem(data = {}) {
+  const errors = [];
+  if (data.type !== 'product' && data.type !== 'service') errors.push({ field: 'type', message: 'نوع قلم فاکتور باید کالا یا خدمت باشد' });
+  if (!isValidId(data.itemId)) errors.push({ field: 'itemId', message: 'کالا/خدمت انتخاب‌شده معتبر نیست' });
+  const nameRes = validateString(data.name, 'name', { required: true, maxLength: 200 });
+  if (!nameRes.valid) errors.push(...nameRes.errors);
+  const qtyRes = validateAmount(data.quantity, 'quantity', { allowZero: false });
+  if (!qtyRes.valid) errors.push({ field: 'quantity', message: 'تعداد باید بیشتر از صفر باشد' });
+  const priceRes = validateAmount(data.unitPrice, 'unitPrice');
+  if (!priceRes.valid) errors.push({ field: 'unitPrice', message: 'قیمت واردشده معتبر نیست' });
+  const discRes = validateAmount(data.discount, 'discount');
+  if (!discRes.valid) errors.push(...discRes.errors);
+  else if (!isEmpty(data.discount)) {
+    const qty = Number(normalizeAmountInput(data.quantity)) || 0;
+    const price = Number(normalizeAmountInput(data.unitPrice)) || 0;
+    const subtotal = qty * price;
+    if (Number(normalizeAmountInput(data.discount)) > subtotal) errors.push({ field: 'discount', message: 'تخفیف نمی‌تواند بیشتر از مبلغ ردیف باشد' });
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+export function validateInvoice(data = {}) {
+  const errors = [];
+  const numRes = validateString(data.invoiceNumber, 'invoiceNumber', { required: true, maxLength: 30 });
+  if (!numRes.valid) errors.push({ field: 'invoiceNumber', message: 'شماره فاکتور الزامی است' });
+  if (!isValidId(data.customerId) && data.allowWalkInCustomer !== true) {
+    // مشتری آزاد در معماری فعلی مجاز است؛ فقط وقتی صراحتاً customerId داده شده باید معتبر باشد
+    if (data.customerId !== null && data.customerId !== undefined && data.customerId !== '' && !isValidId(data.customerId)) {
+      errors.push({ field: 'customerId', message: 'مشتری انتخاب‌شده معتبر نیست' });
+    }
+  }
+  const dateRes = validateDate(data.date, 'date', { required: true });
+  if (!dateRes.valid) errors.push(...dateRes.errors);
+  if (!Array.isArray(data.items)) errors.push({ field: 'items', message: 'اقلام فاکتور باید فهرست معتبر باشد' });
+  else if (data.items.length === 0) errors.push({ field: 'items', message: 'فاکتور باید حداقل یک قلم کالا یا خدمت داشته باشد' });
+  else data.items.forEach((it, idx) => { const r = validateInvoiceItem(it); if (!r.valid) r.errors.forEach(e => errors.push({ field: `items[${idx}].${e.field}`, message: e.message })); });
+
+  const discRes = validateAmount(data.discount, 'discount'); if (!discRes.valid) errors.push(...discRes.errors);
+  const taxRes = validateAmount(data.tax, 'tax'); if (!taxRes.valid) errors.push(...taxRes.errors);
+  const paidRes = validateAmount(data.paidAmount, 'paidAmount'); if (!paidRes.valid) errors.push(...paidRes.errors);
+  if (data.status && !isValidInvoiceStatus(data.status)) errors.push({ field: 'status', message: 'وضعیت فاکتور معتبر نیست' });
+
+  if (paidRes.valid && !isEmpty(data.paidAmount) && typeof data.total === 'number' && data.allowOverpayment !== true) {
+    if (Number(normalizeAmountInput(data.paidAmount)) > data.total) errors.push({ field: 'paidAmount', message: 'مبلغ پرداختی نمی‌تواند بیشتر از مبلغ کل فاکتور باشد' });
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+export function validateTransaction(data = {}) {
+  const errors = [];
+  if (!isValidTransactionType(data.type)) errors.push({ field: 'type', message: 'نوع تراکنش معتبر نیست' });
+  const amtRes = validateAmount(data.amount, 'amount', { required: true, allowZero: false });
+  if (!amtRes.valid) errors.push(...amtRes.errors);
+  const dateRes = validateDate(data.date, 'date', { required: true });
+  if (!dateRes.valid) errors.push(...dateRes.errors);
+  const descRes = validateString(data.description, 'description', { required: true, maxLength: 300 });
+  if (!descRes.valid) errors.push(...descRes.errors);
+  if (!isEmpty(data.customerId) && !isValidId(data.customerId)) errors.push({ field: 'customerId', message: 'مشتری انتخاب‌شده معتبر نیست' });
+  if (!isEmpty(data.supplierId) && !isValidId(data.supplierId)) errors.push({ field: 'supplierId', message: 'تأمین‌کننده انتخاب‌شده معتبر نیست' });
+  const notesRes = validateString(data.notes, 'notes', { maxLength: 1000 });
+  if (!notesRes.valid) errors.push(...notesRes.errors);
+  return { valid: errors.length === 0, errors };
+}
+
+export function validateSettings(data = {}) {
+  const errors = [];
+  const bnRes = validateString(data.businessName, 'businessName', { maxLength: 120 });
+  if (!bnRes.valid) errors.push(...bnRes.errors);
+  const phoneRes = validatePhone(data.phone, 'phone'); if (!phoneRes.valid) errors.push(...phoneRes.errors);
+  const emailRes = validateEmail(data.email, 'email'); if (!emailRes.valid) errors.push(...emailRes.errors);
+  if (!isEmpty(data.invoiceStartNumber)) {
+    const r = validateInteger(data.invoiceStartNumber, 'invoiceStartNumber', { min: 1 });
+    if (!r.valid) errors.push({ field: 'invoiceStartNumber', message: 'شماره شروع فاکتور باید عدد صحیح مثبت باشد' });
+  }
+  if (!isEmpty(data.taxRate)) {
+    const r = validateNumber(data.taxRate, 'taxRate', { min: 0, max: 100 });
+    if (!r.valid) errors.push(...r.errors);
+  }
+  if (data.taxEnabled !== undefined && typeof data.taxEnabled !== 'boolean') errors.push({ field: 'taxEnabled', message: 'وضعیت فعال‌بودن مالیات نامعتبر است' });
+  const currRes = validateString(data.currency, 'currency', { maxLength: 20 }); if (!currRes.valid) errors.push(...currRes.errors);
+  const notesRes = validateString(data.invoiceNotes, 'invoiceNotes', { maxLength: 500 }); if (!notesRes.valid) errors.push(...notesRes.errors);
+  return { valid: errors.length === 0, errors };
+}
