@@ -108,32 +108,82 @@ export async function renderInvoices(App, opts = {}) {
 }
 
 export async function renderInvoiceDetail(App, params) {
-  const id=Number(params.id); const [invoice,settings]=await Promise.all([DB.get('invoices',id),getSettings()]);
-  if(!invoice){App.setView(`${emptyState('فاکتور پیدا نشد','این فاکتور وجود ندارد.')}<button class="btn btn-secondary" data-route="#/invoices">بازگشت به فاکتورها</button>`);return;}
-  const computed=calculateTotals(invoice.items||[],invoice.discount||0,settings.taxEnabled,settings.taxPercent); const repaired={...invoice,discount:computed.discount,tax:computed.tax,total:computed.total,paidAmount:Math.min(Math.max(0,Math.round(Number(invoice.paidAmount)||0)),computed.total),status:deriveInvoiceStatus(invoice.status,invoice.paidAmount,computed.total)}; const balance=Math.max(0,repaired.total-repaired.paidAmount); if(invoice.status!=='cancelled' && (invoice.total!==repaired.total || invoice.discount!==repaired.discount || invoice.tax!==repaired.tax || invoice.paidAmount!==repaired.paidAmount || invoice.status!==repaired.status)) { await DB.put('invoices',{...repaired,updatedAt:Date.now()}); }
-  App.setView(`${pageHeader('جزئیات فاکتور',{back:true,subtitle:`فاکتور ${invoice.number}`})}
-    <div class="invoice-action-bar"><div><span class="badge badge-${invoiceStatusClass(invoice.status)}">${faLabel(INVOICE_STATUS_LABELS,invoice.status)}</span><strong class="invoice-detail-total">${money(invoice.total)}</strong></div><div class="btn-row"><button class="btn btn-primary" id="print-invoice">${icon('printer','')}چاپ</button><button class="btn btn-secondary" id="image-invoice">${icon('image','')}تصویر</button><button class="btn btn-secondary" id="payment-invoice">${icon('wallet','')}ثبت دریافت</button><button class="btn btn-ghost" id="edit-invoice">${icon('edit','')}ویرایش</button></div></div>
-    <article id="invoice-print" class="invoice-box detail-invoice">${invoiceMarkup(repaired,settings)}</article>`);
+  const id=Number(params.id);
+  const [invoice,settings,customer]=await Promise.all([DB.get('invoices',id),getSettings(), DB.get('customers', id)]);
+  if(!invoice){
+    App.setView(`${emptyState('فاکتور پیدا نشد','این فاکتور وجود ندارد.')}<button class="btn btn-secondary" data-route="#/invoices">بازگشت به فاکتورها</button>`);
+    return;
+  }
+  const [allCustomers]=await Promise.all([DB.all('customers')]);
+  const actualCustomer=allCustomers.find(c=>String(c.id)===String(invoice.customerId))||null;
+  const computed=calculateTotals(invoice.items||[],invoice.discount||0,settings.taxEnabled,settings.taxPercent);
+  const repaired={...invoice,discount:computed.discount,tax:computed.tax,total:computed.total,paidAmount:Math.min(Math.max(0,Math.round(Number(invoice.paidAmount)||0)),computed.total),status:deriveInvoiceStatus(invoice.status,invoice.paidAmount,computed.total)};
+  const balance=Math.max(0,repaired.total-repaired.paidAmount);
+  if(invoice.status!=='cancelled' && (invoice.total!==repaired.total || invoice.discount!==repaired.discount || invoice.tax!==repaired.tax || invoice.paidAmount!==repaired.paidAmount || invoice.status!==repaired.status)) {
+    await DB.put('invoices',{...repaired,updatedAt:Date.now()});
+  }
+  App.setView(`${pageHeader('فاکتور',{back:true,subtitle:`شماره ${invoice.number}`})}
+    <div class="invoice-action-bar">
+      <div class="invoice-action-status"><span class="badge badge-${invoiceStatusClass(repaired.status)}">${faLabel(INVOICE_STATUS_LABELS,repaired.status)}</span><strong class="invoice-detail-total">${money(repaired.total)}</strong><small>${balance?`مانده ${money(balance)}`:'تسویه کامل'}</small></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="print-invoice">${icon('printer','')}چاپ</button>
+        <button class="btn btn-secondary" id="image-invoice">${icon('image','')}تصویر</button>
+        ${repaired.status!=='cancelled'&&balance>0?`<button class="btn btn-secondary" id="payment-invoice">${icon('wallet','')}ثبت دریافت</button>`:''}
+        <button class="btn btn-ghost" id="edit-invoice">${icon('edit','')}ویرایش</button>
+      </div>
+    </div>
+    <article id="invoice-print" class="invoice-paper detail-invoice">${invoiceMarkup(repaired,settings,actualCustomer)}</article>`);
   document.querySelector('[data-back]')?.addEventListener('click',()=>history.length>1?history.back():navigate('#/invoices'));
   document.getElementById('print-invoice').onclick=()=>printWithClass('printing-invoice');
   document.getElementById('image-invoice').onclick=()=>invoiceToImage(document.getElementById('invoice-print'),`DIA-Invoice-${invoice.number}.png`).catch(e=>toast(e.message||'خروجی تصویر ناموفق بود','error'));
   document.getElementById('edit-invoice').onclick=()=>editInvoice(repaired);
-  document.getElementById('payment-invoice').onclick=()=>openPaymentModal(repaired);
+  document.getElementById('payment-invoice')?.addEventListener('click',()=>openPaymentModal(repaired));
   function openPaymentModal(current){
     const remaining=Math.max(0,(current.total||0)-(current.paidAmount||0));
     const m=openModal(`<div class="modal-head"><h3>ثبت دریافت</h3><button class="close">${icon('x','')}</button></div><form id="payment-form" class="form-grid" novalidate><div class="field full"><label>مانده فاکتور</label><input value="${money(remaining)}" disabled></div><div class="field full"><label>مبلغ دریافت</label><input name="amount" type="text" inputmode="decimal" autofocus value="${remaining||''}"></div><div class="field full"><label>توضیحات</label><input name="notes" placeholder="مثلاً کارت به کارت"></div><div class="field full"><button class="btn btn-primary btn-block">${icon('check','')}ثبت دریافت</button></div></form>`);
     const f=m.querySelector('#payment-form');m.querySelector('.close').onclick=closeModal;
-    f.onsubmit=async e=>{e.preventDefault();const amount=Number(normalizeAmountInput(new FormData(f).get('amount')))||0;if(amount<=0){toast('مبلغ دریافت باید بیشتر از صفر باشد.','error');return;}if(amount>remaining){toast('مبلغ دریافت از مانده فاکتور بیشتر است.','error');return;}const paid=(current.paidAmount||0)+amount;const status=paid>=current.total?'paid':'partially_paid';await DB.put('invoices',{...current,paidAmount:paid,status,notes:current.notes||''});closeModal();toast('دریافت ثبت شد');renderInvoiceDetail(App,{id:current.id});};
+    f.onsubmit=async e=>{e.preventDefault();const amount=Math.round(Number(normalizeAmountInput(new FormData(f).get('amount')))||0);if(amount<=0){toast('مبلغ دریافت باید بیشتر از صفر باشد.','error');return;}if(amount>remaining){toast('مبلغ دریافت از مانده فاکتور بیشتر است.','error');return;}const paid=(current.paidAmount||0)+amount;const status=paid>=current.total?'paid':'partially_paid';await DB.put('invoices',{...current,paidAmount:paid,status,notes:current.notes||''});closeModal();toast('دریافت ثبت شد');renderInvoiceDetail(App,{id:current.id});};
   }
   document.querySelectorAll('[data-route]').forEach(b=>b.onclick=e=>{e.preventDefault();navigate(b.dataset.route)});
 }
 
 async function editInvoice(invoice){ navigate(`#/invoices?edit=${encodeURIComponent(invoice.id)}`); }
 
-function invoiceMarkup(x,settings){
-  return `<div class="invoice-head"><div><div class="invoice-title">${esc(settings.businessName||'DIA Business')}</div><div class="invoice-number">فاکتور فروش</div>${settings.phone?`<div class="invoice-number">${esc(settings.phone)}</div>`:''}</div><div class="invoice-number">شماره: <strong>${esc(x.number)}</strong><br>تاریخ: ${dateFa(x.date||x.createdAt)}<br>وضعیت: ${faLabel(INVOICE_STATUS_LABELS,x.status)}</div></div>
-  <div class="invoice-meta"><strong>طرف حساب</strong><br>${esc(x.customerName||'مشتری آزاد')}</div>
-  <table class="invoice-table"><thead><tr><th>ردیف</th><th>شرح کالا / خدمت</th><th>تعداد</th><th>واحد</th><th>قیمت واحد</th><th>تخفیف</th><th>جمع</th></tr></thead><tbody>${(x.items||[]).map((i,k)=>`<tr><td>${num(k+1)}</td><td>${esc(i.name)}</td><td>${num(i.quantity)}</td><td>${esc(i.unit||'')}</td><td>${money(i.unitPrice,'')}</td><td>${money(i.discount||0,'')}</td><td>${money(Math.max(0,i.quantity*i.unitPrice-(i.discount||0)),'')}</td></tr>`).join('')}</tbody></table>
-  <div class="invoice-summary-grid"><div><span>جمع اقلام</span><strong>${money((x.items||[]).reduce((s,i)=>s+Math.max(0,i.quantity*i.unitPrice-(i.discount||0)),0))}</strong></div><div><span>تخفیف کلی</span><strong>${money(x.discount||0)}</strong></div>${x.tax?`<div><span>مالیات</span><strong>${money(x.tax)}</strong></div>`:''}<div class="invoice-grand-total"><span>مبلغ نهایی</span><strong>${money(x.total)}</strong></div><div><span>پرداخت‌شده</span><strong>${money(x.paidAmount||0)}</strong></div><div><span>مانده</span><strong class="${(x.total||0)-(x.paidAmount||0)>0?'red':'green'}">${money(Math.abs((x.total||0)-(x.paidAmount||0)))}</strong></div></div>
-  <div class="invoice-words">مبلغ به حروف: ${amountToWordsFa(x.total,settings.currency||'تومان')}</div>${x.notes?`<div class="invoice-notes">توضیحات: ${esc(x.notes)}</div>`:''}<div class="invoice-signature">${esc(settings.invoiceNote||'از انتخاب شما سپاسگزاریم.')}<br><br>مهر و امضا</div>`;
+function invoiceMarkup(x,settings,customer=null){
+  const items=(x.items||[]).map((i,k)=>({
+    index:k+1,name:i.name||'—',qty:Number(i.quantity)||0,unit:i.unit||'مورد',unitPrice:Number(i.unitPrice)||0,discount:Number(i.discount)||0,
+    total:Math.max(0,(Number(i.quantity)||0)*(Number(i.unitPrice)||0)-(Number(i.discount)||0))
+  }));
+  const subtotal=items.reduce((s,i)=>s+i.total,0);
+  const paid=Math.min(Math.max(0,Number(x.paidAmount)||0),Number(x.total)||0);
+  const balance=Math.max(0,(Number(x.total)||0)-paid);
+  return `<div class="invoice-brand-row">
+      <div class="invoice-brand">
+        <img class="invoice-logo" src="./assets/apple-touch-icon.png" alt="">
+        <div><div class="invoice-business-name">${esc(settings.businessName||'DIA Business')}</div><div class="invoice-business-sub">${esc(settings.ownerName||'تأسیسات الکتریکی و نورپردازی')}</div></div>
+      </div>
+      <div class="invoice-title-block"><div class="invoice-doc-label">فاکتور فروش</div><div class="invoice-doc-number">شماره <strong>${esc(x.number)}</strong></div></div>
+    </div>
+    <div class="invoice-accent"></div>
+    <div class="invoice-info-grid">
+      <div class="invoice-info-card"><span>تاریخ</span><strong>${dateFa(x.date||x.createdAt)}</strong></div>
+      <div class="invoice-info-card"><span>وضعیت</span><strong>${faLabel(INVOICE_STATUS_LABELS,x.status)}</strong></div>
+      <div class="invoice-info-card invoice-customer-card"><span>طرف حساب</span><strong>${esc(x.customerName||'مشتری آزاد')}</strong>${customer?.mobile?`<small>${esc(customer.mobile)}</small>`:''}</div>
+      ${settings.phone?`<div class="invoice-info-card"><span>تلفن فروشنده</span><strong>${esc(settings.phone)}</strong></div>`:''}
+    </div>
+    <div class="invoice-section-label">جزئیات فاکتور</div>
+    <div class="invoice-table-wrap"><table class="invoice-table clean-invoice-table"><thead><tr><th class="col-index">ردیف</th><th>شرح کالا / خدمت</th><th class="num-col">تعداد</th><th class="unit-col">واحد</th><th class="money-col">قیمت واحد</th><th class="money-col discount-col">تخفیف</th><th class="money-col">مبلغ</th></tr></thead><tbody>${items.length?items.map(i=>`<tr><td class="col-index">${num(i.index)}</td><td class="item-name">${esc(i.name)}</td><td class="num-col">${num(i.qty)}</td><td class="unit-col">${esc(i.unit)}</td><td class="money-col">${money(i.unitPrice,'')}</td><td class="money-col discount-col">${money(i.discount,'')}</td><td class="money-col total-col">${money(i.total,'')}</td></tr>`).join(''):`<tr><td colspan="7" class="invoice-empty-row">موردی برای نمایش ثبت نشده است.</td></tr>`}</tbody></table></div>
+    <div class="invoice-bottom-grid">
+      <div class="invoice-words-block"><span>مبلغ به حروف</span><strong>${esc(amountToWordsFa(x.total,settings.currency||'تومان'))}</strong>${x.notes?`<div class="invoice-notes-block"><span>توضیحات</span><p>${esc(x.notes)}</p></div>`:''}</div>
+      <div class="invoice-summary-box">
+        <div><span>جمع اقلام</span><strong>${money(subtotal)}</strong></div>
+        <div><span>تخفیف کلی</span><strong>${money(x.discount||0)}</strong></div>
+        ${settings.taxEnabled?`<div><span>مالیات</span><strong>${money(x.tax||0)}</strong></div>`:''}
+        <div class="grand"><span>مبلغ نهایی</span><strong>${money(x.total)}</strong></div>
+        <div><span>پرداخت‌شده</span><strong class="green">${money(paid)}</strong></div>
+        <div class="balance-row"><span>مانده</span><strong class="${balance?'red':'green'}">${money(balance)}</strong></div>
+      </div>
+    </div>
+    <div class="invoice-footer-note">${esc(settings.invoiceNote||'از انتخاب شما سپاسگزاریم.')}</div>
+    <div class="invoice-signatures"><div><span>امضای خریدار</span><div></div></div><div><span>مهر و امضای فروشنده</span><div></div></div></div>`;
 }
