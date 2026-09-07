@@ -7,7 +7,28 @@ export const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;'
 export const icon=(name,label='',cls='icon')=>`<img class="${cls}" src="./assets/icons/${name}.svg" alt="${esc(label)}" aria-hidden="${label?'false':'true'}">`;
 export const todayISO=()=>new Date().toISOString().slice(0,10);
 export function toast(msg,kind=''){const r=document.getElementById('toast-root');if(!r)return;r.innerHTML=`<div class="toast ${kind?'toast-'+kind:''}" role="status">${esc(msg)}</div>`;clearTimeout(toast._t);toast._t=setTimeout(()=>r.innerHTML='',2600);}
-export function downloadBlob(blob,name){const a=document.createElement('a');const url=URL.createObjectURL(blob);a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+export async function downloadBlob(blob,name){
+  if(!blob) throw new Error('فایل خروجی ساخته نشد.');
+  // iOS Safari often ignores <a download> for Blob URLs. Prefer the native
+  // Share Sheet when a File can be shared, then fall back to opening the file.
+  try{
+    const file=new File([blob],name,{type:blob.type||'application/octet-stream'});
+    if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:name});
+      return {shared:true};
+    }
+  }catch(err){
+    if(err?.name==='AbortError') return {cancelled:true};
+  }
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=name;a.rel='noopener';
+  document.body.appendChild(a);a.click();a.remove();
+  // On Safari, opening the blob is a more reliable last resort than silently
+  // failing a download attribute.
+  setTimeout(()=>{try{window.open(url,'_blank','noopener')}catch(_){}},120);
+  setTimeout(()=>URL.revokeObjectURL(url),30000);
+  return {downloaded:true};
+}
 export const downloadJSON=(data,name)=>downloadBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),name);
 export function printWithClass(cls){document.body.classList.add(cls);const cleanup=()=>{document.body.classList.remove(cls);window.removeEventListener('afterprint',cleanup)};window.addEventListener('afterprint',cleanup);setTimeout(()=>window.print(),40);}
 export async function invoiceToImage(el,name='invoice.png'){
@@ -65,7 +86,8 @@ export async function invoiceToImage(el,name='invoice.png'){
   // signatures
   const sw=(CONTENT-40)/2;[['امضای خریدار',PAD],['مهر و امضای فروشنده',PAD+sw+40]].forEach(([label,x0])=>{font(14,true);ctx.fillStyle=C.text;ctx.textAlign='center';ctx.fillText(label,x0+sw/2,y);ctx.strokeStyle='#b9c4bf';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x0+30,y+54);ctx.lineTo(x0+sw-30,y+54);ctx.stroke();});
   canvas.height=Math.min(canvas.height,Math.ceil((y+100)*2));
-  canvas.toBlob(b=>{if(!b)throw new Error('ساخت PNG ناموفق بود.');downloadBlob(b,name);},'image/png',1);
+  const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('ساخت PNG ناموفق بود.')),'image/png',1));
+  return downloadBlob(blob,name);
 }
 
 const Y=['','یک','دو','سه','چهار','پنج','شش','هفت','هشت','نه'],D19=['ده','یازده','دوازده','سیزده','چهارده','پانزده','شانزده','هفده','هجده','نوزده'],D=['','','بیست','سی','چهل','پنجاه','شصت','هفتاد','هشتاد','نود'],H=['','صد','دویست','سیصد','چهارصد','پانصد','ششصد','هفتصد','هشتصد','نهصد'],S=['','هزار','میلیون','میلیارد','هزار میلیارد','میلیون میلیارد'];
@@ -85,14 +107,33 @@ export function buildCustomerLedger(invoices=[],transactions=[],customerId){
   const ledger=[];
   its.forEach(i=>{
     ledger.push({date:i.date?new Date(i.date).getTime():i.createdAt,desc:`فاکتور ${i.number}`,debit:Number(i.total)||0,credit:0,ref:i.id,kind:'invoice'});
-    if(Number(i.paidAmount)>0) ledger.push({date:i.updatedAt||i.createdAt,desc:`دریافت فاکتور ${i.number}`,debit:0,credit:Number(i.paidAmount)||0,ref:i.id,kind:'payment'});
+    const linked=pays.filter(t=>String(t.invoiceId)===String(i.id));
+    const linkedPaid=linked.reduce((s,t)=>s+(Number(t.amount)||0),0);
+    // New payments are stored as transactions and are the source of truth.
+    // Legacy invoices without linked payment transactions keep their old paidAmount as a fallback.
+    if(linked.length){
+      linked.forEach(t=>ledger.push({date:t.createdAt||i.updatedAt||i.createdAt,desc:t.description||`دریافت فاکتور ${i.number}`,debit:0,credit:Number(t.amount)||0,ref:t.id,invoiceId:i.id,kind:'payment'}));
+    }else if(Number(i.paidAmount)>0){
+      ledger.push({date:i.updatedAt||i.createdAt,desc:`دریافت فاکتور ${i.number}`,debit:0,credit:Number(i.paidAmount)||0,ref:i.id,invoiceId:i.id,kind:'payment',legacy:true});
+    }
   });
-  pays.forEach(t=>ledger.push({date:t.createdAt,desc:t.description||'دریافت وجه',debit:0,credit:Number(t.amount)||0,ref:t.id,kind:'payment'}));
+  pays.filter(t=>!t.invoiceId).forEach(t=>ledger.push({date:t.createdAt,desc:t.description||'دریافت وجه',debit:0,credit:Number(t.amount)||0,ref:t.id,kind:'payment'}));
   ledger.sort((a,b)=>a.date-b.date||String(a.kind).localeCompare(String(b.kind)));
   let running=0; ledger.forEach(r=>{running+=r.debit-r.credit;r.balance=running;});
   const total=its.reduce((s,i)=>s+(Number(i.total)||0),0);
-  const paid=its.reduce((s,i)=>s+(Number(i.paidAmount)||0),0)+pays.reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const paid=ledger.reduce((s,r)=>s+(Number(r.credit)||0),0);
   return {invoices:its,transactions:pays,ledger,total,paid,balance:total-paid};
+}
+export function invoicePaidAmount(invoice, transactions=[]){
+  const linked=transactions.filter(t=>String(t.invoiceId)===String(invoice.id)&&t.type==='customer_payment');
+  return linked.length ? linked.reduce((s,t)=>s+(Number(t.amount)||0),0) : Math.max(0,Number(invoice.paidAmount)||0);
+}
+export function financialSummary(invoices=[],transactions=[]){
+  const valid=invoices.filter(i=>i.status!=='cancelled');
+  const received=valid.reduce((sum,i)=>{
+    return sum+invoicePaidAmount(i,transactions);
+  },0) + transactions.filter(t=>t.type==='customer_payment'&&!t.invoiceId).reduce((s,t)=>s+(Number(t.amount)||0),0);
+  return {sales:valid.reduce((s,i)=>s+(Number(i.total)||0),0),received};
 }
 export function totalReceivables(customers=[],invoices=[],transactions=[]){
   return customers.reduce((sum,c)=>sum+Math.max(0,buildCustomerLedger(invoices,transactions,c.id).balance),0);
