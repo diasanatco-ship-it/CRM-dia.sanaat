@@ -1,26 +1,17 @@
 import { DB, getSettings } from '../db.js';
-import { money, num, dateFa, esc, toast, invoiceToImage, amountToWordsFa, printWithClass, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, showValidationErrors, todayISO, invoicePaidAmount } from '../utils.js';
+import { money, num, dateFa, esc, toast, invoiceToImage, amountToWordsFa, printWithClass, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, showValidationErrors, todayISO, invoicePaidAmount, bindAmountInput } from '../utils.js';
 import { INVOICE_STATUS, validateInvoice, normalizeAmountInput } from '../validators.js';
+import { calculateInvoice, invoiceStatusFromPayment } from '../invoice-engine.js';
 import { navigate } from '../router.js';
 import { pageHeader, emptyState, openModal, closeModal, actionMenu, bindActionMenus } from '../components.js';
 
-function calculateTotals(items, discount, taxEnabled, taxPercent) {
-  const lineTotals = items.map(i => Math.max(0, Number(i.quantity)||0) * Math.max(0, Number(i.unitPrice)||0) - Math.max(0, Number(i.discount)||0));
-  const subtotal = Math.round(lineTotals.reduce((s, v) => s + Math.max(0, v), 0));
-  const safeDiscount = Math.min(Math.max(0, Math.round(Number(discount)||0)), subtotal);
-  const after = subtotal - safeDiscount;
-  const safeTaxPercent = Math.min(100, Math.max(0, Number(taxPercent)||0));
-  const tax = taxEnabled ? Math.round(after * safeTaxPercent / 100) : 0;
-  return { subtotal, discount: safeDiscount, after, tax, total: after + tax, lineTotals };
+function calculateTotals(items, discount, taxEnabled, taxPercent, discountType='amount', extraCosts=0) {
+  const result = calculateInvoice(items, { discount, discountType, taxEnabled, taxPercent, extraCosts });
+  return { ...result, lineTotals: result.items.map(i => i.total) };
 }
 
 function deriveInvoiceStatus(status, paidAmount, total) {
-  if (status === 'cancelled') return 'cancelled';
-  const paid = Math.max(0, Math.round(Number(paidAmount)||0));
-  const t = Math.max(0, Math.round(Number(total)||0));
-  if (paid >= t && t > 0) return 'paid';
-  if (paid > 0) return 'partially_paid';
-  return status === 'draft' ? 'draft' : 'issued';
+  return invoiceStatusFromPayment(status, paidAmount, total);
 }
 
 function invoiceStatusClass(status) { return INVOICE_STATUS_BADGE[status] || 'muted'; }
@@ -81,7 +72,13 @@ export async function renderInvoices(App, opts = {}) {
         <div class="section-title-row"><div class="section-title-compact">اقلام فاکتور</div><button type="button" class="btn btn-secondary" id="add-item">${icon('plus','')}افزودن ردیف</button></div>
         <div id="items"></div>
         <div class="section-title">تخفیف، مالیات و پرداخت</div>
-        <div class="form-grid"><div class="field"><label>تخفیف کلی</label><input name="discount" type="text" inputmode="decimal" value="${existing?.discount||0}"></div>${settings.taxEnabled?`<div class="field"><label>مالیات ${num(settings.taxPercent)}٪</label><input id="tax-preview" disabled value="0 تومان"></div>`:''}<div class="field"><label>مبلغ پرداختی</label><input name="paidAmount" type="text" inputmode="decimal" value="${existing?.paidAmount||0}"></div></div>
+        <div class="form-grid">
+          <div class="field"><label>نوع تخفیف کلی</label><select name="discountType"><option value="amount" ${(existing?.discountType||'amount')==='amount'?'selected':''}>مبلغ ثابت</option><option value="percent" ${existing?.discountType==='percent'?'selected':''}>درصدی</option></select></div>
+          <div class="field"><label id="discount-label">تخفیف کلی</label><input name="discount" class="amount-input" type="text" inputmode="decimal" value="${existing?.discountInput ?? existing?.discount ?? 0}"></div>
+          ${settings.taxEnabled?`<div class="field"><label>مالیات ${num(settings.taxPercent)}٪</label><input id="tax-preview" disabled value="۰ تومان"></div>`:''}
+          <div class="field"><label>هزینه‌های جانبی</label><input name="extraCosts" class="amount-input" type="text" inputmode="decimal" value="${existing?.extraCosts||0}"></div>
+          <div class="field"><label>مبلغ پرداختی</label><input name="paidAmount" class="amount-input" type="text" inputmode="decimal" value="${existing?.paidAmount||0}"></div>
+        </div>
         <div class="field mt-3"><label>توضیحات</label><textarea name="notes">${esc(existing?.notes||'')}</textarea></div>
         <div class="card card-pad mt-3"><div class="invoice-total"><span>جمع اقلام</span><span id="subtotal">۰ تومان</span></div><div class="invoice-total"><span>تخفیف</span><span id="discount-preview">۰ تومان</span></div>${settings.taxEnabled?`<div class="invoice-total"><span>مالیات</span><span id="tax-total">۰ تومان</span></div>`:''}<div class="invoice-total"><span>مبلغ نهایی</span><strong id="sum">۰ تومان</strong></div></div>
       </form>
@@ -90,21 +87,36 @@ export async function renderInvoices(App, opts = {}) {
     const catalog = [...products.map(p=>({type:'product',id:p.id,name:p.name,unit:p.unit||'عدد',price:Number(p.salePrice)||0})), ...services.map(s=>({type:'service',id:s.id,name:s.name,unit:s.unit||'مورد',price:Number(s.price)||0}))];
     const addRow = (item=null) => {
       counter++; const row=document.createElement('div'); row.className='card card-pad invoice-row';
-      row.innerHTML=`<div class="invoice-row-head"><strong>ردیف ${num(counter)}</strong><button type="button" class="btn btn-danger btn-remove">${icon('trash','')}حذف</button></div><div class="field full"><label>کالا / خدمت</label><div class="invoice-search-wrap"><input class="item-search" autocomplete="off" placeholder="نام کالا یا خدمت را تایپ کنید" value="${esc(item?.name||'')}"><div class="invoice-results" hidden></div></div><div class="selected-item" ${item?'':'hidden'}><span class="selected-name">${esc(item?.name||'')}</span><small class="selected-type">${item?(item.type==='product'?'کالا':'خدمت'):''}</small></div></div><div class="form-grid mt-3"><div class="field"><label>تعداد</label><input class="qty" type="text" inputmode="decimal" value="${item?.quantity??1}"></div><div class="field"><label>قیمت واحد</label><input class="price" type="text" inputmode="decimal" value="${item?.unitPrice??0}"></div><div class="field"><label>تخفیف ردیف</label><input class="rdisc" type="text" inputmode="decimal" value="${item?.discount??0}"></div></div>`;
-      row._item=item?{...item}:null; itemsEl.appendChild(row);
+      row.innerHTML=`<div class="invoice-row-head"><strong>ردیف ${num(counter)}</strong><button type="button" class="btn btn-danger btn-remove">${icon('trash','')}حذف</button></div><div class="field full"><label>کالا / خدمت</label><div class="invoice-search-wrap"><input class="item-search" autocomplete="off" placeholder="نام کالا یا خدمت را تایپ کنید" value="${esc(item?.name||'')}"><div class="invoice-results" hidden></div></div><div class="selected-item" ${item?'':'hidden'}><span class="selected-name">${esc(item?.name||'')}</span><small class="selected-type">${item?(item.type==='product'?'کالا':'خدمت'):''}</small></div></div><div class="form-grid mt-3"><div class="field"><label>تعداد</label><input class="qty" type="text" inputmode="decimal" value="${item?.quantity??1}"></div><div class="field"><label>قیمت واحد</label><input class="price" type="text" inputmode="decimal" value="${item?.unitPrice??0}"></div><div class="field"><label>نوع تخفیف ردیف</label><select class="rdtype"><option value="amount" ${(item?.discountType||'amount')==='amount'?'selected':''}>مبلغ</option><option value="percent" ${item?.discountType==='percent'?'selected':''}>درصد</option></select></div><div class="field"><label>تخفیف ردیف</label><input class="rdisc amount-input" type="text" inputmode="decimal" value="${item?.discountInput ?? item?.discount ?? 0}"></div></div>`;
+      row._item=item?{...item,id:item.id ?? item.itemId ?? null}:null; itemsEl.appendChild(row);
       const search=row.querySelector('.item-search'), results=row.querySelector('.invoice-results');
       const renderResults=q=>{const s=(q||'').trim().toLocaleLowerCase('fa-IR');const found=catalog.filter(x=>!s||x.name.toLocaleLowerCase('fa-IR').includes(s)).slice(0,8);results.innerHTML=found.map(x=>`<button type="button" class="invoice-result" data-id="${x.id}" data-type="${x.type}"><span>${esc(x.name)}<small>${x.type==='product'?'کالا':'خدمت'} · ${esc(x.unit)}</small></span><strong>${money(x.price)}</strong></button>`).join('')||`<div class="hint empty-result">موردی پیدا نشد.</div>`;results.hidden=false;};
       search.oninput=()=>renderResults(search.value); search.onfocus=()=>renderResults(search.value);
       results.addEventListener('click',e=>{const b=e.target.closest('.invoice-result');if(!b)return;const found=catalog.find(x=>x.id==b.dataset.id&&x.type===b.dataset.type);row._item={...found,quantity:1,unitPrice:found.price,discount:0};search.value=found.name;row.querySelector('.selected-item').hidden=false;row.querySelector('.selected-name').textContent=found.name;row.querySelector('.selected-type').textContent=found.type==='product'?'کالا':'خدمت';row.querySelector('.qty').value='1';row.querySelector('.price').value=String(found.price);results.hidden=true;refreshTotals();setTimeout(()=>row.querySelector('.qty').focus(),40);});
-      row.querySelectorAll('input').forEach(i=>i.addEventListener('input',refreshTotals));
+      row.querySelectorAll('input,select').forEach(i=>{i.addEventListener('input',refreshTotals);i.addEventListener('change',refreshTotals);if(i.classList.contains('qty'))bindAmountInput(i,{allowDecimal:true});else if(i.classList.contains('price')||i.classList.contains('rdisc'))bindAmountInput(i,{allowDecimal:false});});
       row.querySelector('.qty').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addRow();itemsEl.lastElementChild.querySelector('.item-search').focus();}});
       row.querySelector('.btn-remove').onclick=()=>{row.remove();refreshTotals();}; if(!item)setTimeout(()=>search.focus(),20);
     };
-    const readItems=()=>[...itemsEl.querySelectorAll('.invoice-row')].map(row=>{const it=row._item||{};return {type:it.type||'product',itemId:it.id??null,name:row.querySelector('.item-search').value.trim(),unit:it.unit||'مورد',quantity:Number(normalizeAmountInput(row.querySelector('.qty').value))||0,unitPrice:Number(normalizeAmountInput(row.querySelector('.price').value))||0,discount:Number(normalizeAmountInput(row.querySelector('.rdisc').value))||0};});
-    const refreshTotals=()=>{const its=readItems(),d=Number(normalizeAmountInput(f.discount.value))||0,z=calculateTotals(its,d,settings.taxEnabled,settings.taxPercent);m.querySelector('#subtotal').textContent=money(z.subtotal);m.querySelector('#discount-preview').textContent=money(z.discount);m.querySelector('#sum').textContent=money(z.total);m.querySelector('#sticky-sum').textContent=money(z.total);if(settings.taxEnabled){m.querySelector('#tax-preview').value=money(z.tax);m.querySelector('#tax-total').textContent=money(z.tax);}return z;};
+    const readItems=()=>[...itemsEl.querySelectorAll('.invoice-row')].map(row=>{const it=row._item||{};return {type:it.type||'product',itemId:it.id??it.itemId??null,name:row.querySelector('.item-search').value.trim(),unit:it.unit||'مورد',quantity:Number(normalizeAmountInput(row.querySelector('.qty').value))||0,unitPrice:Number(normalizeAmountInput(row.querySelector('.price').value))||0,discountType:row.querySelector('.rdtype')?.value||it.discountType||'amount',discountInput:Number(normalizeAmountInput(row.querySelector('.rdisc').value))||0,discount:Number(normalizeAmountInput(row.querySelector('.rdisc').value))||0};});
+    const refreshTotals=()=>{
+      const its=readItems();
+      const d=Number(normalizeAmountInput(f.discount.value))||0;
+      const extra=Number(normalizeAmountInput(f.extraCosts?.value))||0;
+      const z=calculateTotals(its,d,settings.taxEnabled,settings.taxPercent,f.discountType?.value||'amount',extra);
+      m.querySelector('#subtotal').textContent=money(z.subtotal);
+      m.querySelector('#discount-preview').textContent=money(z.discountTotal);
+      m.querySelector('#sum').textContent=money(z.total);
+      m.querySelector('#sticky-sum').textContent=money(z.total);
+      if(settings.taxEnabled){m.querySelector('#tax-preview').value=money(z.tax);m.querySelector('#tax-total').textContent=money(z.tax);}
+      const label=m.querySelector('#discount-label'); if(label) label.textContent=f.discountType.value==='percent'?'تخفیف کلی (٪)':'تخفیف کلی (تومان)';
+      return z;
+    };
     if(existing?.items?.length) existing.items.forEach(addRow); else addRow();
-    m.querySelector('#add-item').onclick=()=>addRow(); f.discount.oninput=refreshTotals; m.querySelector('.close').onclick=closeModal; m.querySelector('#save-invoice').onclick=()=>f.requestSubmit(); refreshTotals();
-    f.onsubmit=async e=>{e.preventDefault();const its=readItems(),rawDiscount=Number(normalizeAmountInput(f.discount.value))||0,z=calculateTotals(its,rawDiscount,settings.taxEnabled,settings.taxPercent),fd=Object.fromEntries(new FormData(f));let paidAmount=Math.round(Number(normalizeAmountInput(fd.paidAmount))||0);const data={invoiceNumber:existing?.number||nextNumber().number,customerId:fd.customerId?Number(fd.customerId):null,projectId:fd.projectId?Number(fd.projectId):null,date:fd.date,items:its,discount:z.discount,tax:z.tax,paidAmount,status:deriveInvoiceStatus(fd.status,paidAmount,z.total),total:z.total,allowOverpayment:false};const v=validateInvoice(data);if(showValidationErrors(f,v))return;if(!existing&&rows.some(x=>String(x.number)===String(data.invoiceNumber))){toast('شماره فاکتور تکراری است.','error');return;}const txs=await DB.all('transactions');const linked=existing?txs.filter(t=>String(t.invoiceId)===String(existing.id)&&t.type==='customer_payment'):[];const recorded=linked.length?linked.reduce((sum,t)=>sum+(Number(t.amount)||0),0):Math.max(0,Number(existing?.paidAmount)||0);if(existing&&paidAmount<recorded){toast('مبلغ پرداخت‌شده قبلی قابل کاهش نیست. برای اصلاح از ثبت اصلاحی/برگشت وجه استفاده کنید.','error');return;}const customer=customers.find(c=>c.id===data.customerId);const row={...(existing||{}),number:data.invoiceNumber,seq:existing?.seq||nextNumber().seq,customerId:data.customerId,projectId:data.projectId,customerName:customer?.name||'مشتری آزاد',items:its,discount:data.discount,tax:data.tax,total:data.total,paidAmount:data.paidAmount,status:data.status,notes:fd.notes||'',date:data.date,createdAt:existing?.createdAt||new Date(fd.date).getTime()};if(existing){await DB.put('invoices',row);}else{row.id=await DB.add('invoices',row);}const delta=Math.max(0,paidAmount-recorded);if(delta>0){await DB.add('transactions',{type:'customer_payment',amount:delta,customerId:data.customerId,invoiceId:row.id,party:customer?.name||'مشتری آزاد',description:'دریافت هنگام ثبت/ویرایش فاکتور',projectId:row.projectId||null,createdAt:new Date(fd.date).getTime()});}if(existing&&linked.length===0&&recorded>0){/* legacy paidAmount remains the fallback until a linked transaction is created */}closeModal();toast(existing?'فاکتور ویرایش شد':'فاکتور ثبت شد');navigate(`#/invoices/${row.id}`);};
+    m.querySelector('#add-item').onclick=()=>addRow();
+    [f.discount,f.extraCosts,f.paidAmount].filter(Boolean).forEach(i=>bindAmountInput(i,{allowDecimal:false}));
+    f.discount.addEventListener('input',refreshTotals); f.extraCosts?.addEventListener('input',refreshTotals); f.discountType?.addEventListener('change',refreshTotals);
+    m.querySelector('.close').onclick=closeModal; m.querySelector('#save-invoice').onclick=()=>f.requestSubmit(); refreshTotals();
+    f.onsubmit=async e=>{e.preventDefault();const its=readItems(),rawDiscount=Number(normalizeAmountInput(f.discount.value))||0,rawExtra=Number(normalizeAmountInput(f.extraCosts?.value))||0,fd=Object.fromEntries(new FormData(f));const z=calculateTotals(its,rawDiscount,settings.taxEnabled,settings.taxPercent,fd.discountType||'amount',rawExtra);let paidAmount=Math.round(Number(normalizeAmountInput(fd.paidAmount))||0);const data={invoiceNumber:existing?.number||nextNumber().number,customerId:fd.customerId?Number(fd.customerId):null,projectId:fd.projectId?Number(fd.projectId):null,date:fd.date,items:z.items.map(({lineSubtotal,...i})=>i),discount:z.discountTotal,discountType:z.discountType,discountInput:z.discountInput,extraCosts:z.extraCosts,tax:z.tax,paidAmount,status:deriveInvoiceStatus(fd.status,paidAmount,z.total),total:z.total,remainingAmount:z.remainingAmount,allowOverpayment:false};const v=validateInvoice(data);if(showValidationErrors(f,v))return;if(!existing&&rows.some(x=>String(x.number)===String(data.invoiceNumber))){toast('شماره فاکتور تکراری است.','error');return;}const txs=await DB.all('transactions');const linked=existing?txs.filter(t=>String(t.invoiceId)===String(existing.id)&&t.type==='customer_payment'):[];const recorded=linked.length?linked.reduce((sum,t)=>sum+(Number(t.amount)||0),0):Math.max(0,Number(existing?.paidAmount)||0);if(existing&&paidAmount<recorded){toast('مبلغ پرداخت‌شده قبلی قابل کاهش نیست. برای اصلاح از ثبت اصلاحی/برگشت وجه استفاده کنید.','error');return;}const customer=customers.find(c=>c.id===data.customerId);const row={...(existing||{}),number:data.invoiceNumber,seq:existing?.seq||nextNumber().seq,customerId:data.customerId,projectId:data.projectId,customerName:customer?.name||'مشتری آزاد',items:data.items,discount:data.discount,discountType:data.discountType,discountInput:data.discountInput,extraCosts:data.extraCosts,tax:data.tax,total:data.total,paidAmount:data.paidAmount,remainingAmount:data.remainingAmount,status:data.status,notes:fd.notes||'',date:data.date,createdAt:existing?.createdAt||new Date(fd.date).getTime()};if(existing){await DB.put('invoices',row);}else{row.id=await DB.add('invoices',row);}const delta=Math.max(0,paidAmount-recorded);if(delta>0){await DB.add('transactions',{type:'customer_payment',amount:delta,customerId:data.customerId,invoiceId:row.id,party:customer?.name||'مشتری آزاد',description:'دریافت هنگام ثبت/ویرایش فاکتور',projectId:row.projectId||null,createdAt:new Date(fd.date).getTime()});}if(existing&&linked.length===0&&recorded>0){/* legacy paidAmount remains the fallback until a linked transaction is created */}closeModal();toast(existing?'فاکتور ویرایش شد':'فاکتور ثبت شد');navigate(`#/invoices/${row.id}`);};
   }
 }
 
@@ -117,7 +129,7 @@ export async function renderInvoiceDetail(App, params) {
   }
   const [allCustomers]=await Promise.all([DB.all('customers')]);
   const actualCustomer=allCustomers.find(c=>String(c.id)===String(invoice.customerId))||null;
-  const computed=calculateTotals(invoice.items||[],invoice.discount||0,settings.taxEnabled,settings.taxPercent);
+  const computed=calculateTotals(invoice.items||[],invoice.discountInput ?? invoice.discount ?? 0,settings.taxEnabled,settings.taxPercent,invoice.discountType||'amount',invoice.extraCosts||0);
   const effectivePaid=Math.min(Math.max(0,Math.round(invoicePaidAmount(invoice,transactions))),computed.total);
   const repaired={...invoice,discount:computed.discount,tax:computed.tax,total:computed.total,paidAmount:effectivePaid,status:deriveInvoiceStatus(invoice.status,effectivePaid,computed.total)};
   const balance=Math.max(0,repaired.total-repaired.paidAmount);
@@ -181,6 +193,7 @@ function invoiceMarkup(x,settings,customer=null){
         <div><span>جمع اقلام</span><strong>${money(subtotal)}</strong></div>
         <div><span>تخفیف کلی</span><strong>${money(x.discount||0)}</strong></div>
         ${settings.taxEnabled?`<div><span>مالیات</span><strong>${money(x.tax||0)}</strong></div>`:''}
+        ${(Number(x.extraCosts)||0)>0?`<div><span>هزینه‌های جانبی</span><strong>${money(x.extraCosts)}</strong></div>`:''}
         <div class="grand"><span>مبلغ نهایی</span><strong>${money(x.total)}</strong></div>
         <div><span>پرداخت‌شده</span><strong class="green">${money(paid)}</strong></div>
         <div class="balance-row"><span>مانده</span><strong class="${balance?'red':'green'}">${money(balance)}</strong></div>
