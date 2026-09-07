@@ -1,5 +1,5 @@
 import { DB } from '../db.js';
-import { money, num, dateFa, esc, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, totalReceivables } from '../utils.js';
+import { money, num, dateFa, esc, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, totalReceivables, financialSummary } from '../utils.js';
 import { pageHeader } from '../components.js';
 import { navigate } from '../router.js';
 
@@ -9,8 +9,8 @@ export async function renderDashboard(App) {
   const valid=invoices.filter(i=>i.status!=='cancelled');
   const sales=valid.reduce((s,i)=>s+(i.total||0),0);
   const salesMonth=valid.filter(i=>i.createdAt>=monthStart).reduce((s,i)=>s+(i.total||0),0);
-  const received=transactions.filter(t=>t.type==='customer_payment').reduce((s,t)=>s+(t.amount||0),0)+valid.reduce((s,i)=>s+(i.paidAmount||0),0);
-  const receivedMonth=transactions.filter(t=>t.type==='customer_payment'&&t.createdAt>=monthStart).reduce((s,t)=>s+(t.amount||0),0)+valid.filter(i=>i.createdAt>=monthStart).reduce((s,i)=>s+(i.paidAmount||0),0);
+  const received=financialSummary(invoices,transactions).received;
+  const receivedMonth=valid.filter(i=>i.createdAt>=monthStart).reduce((sum,i)=>{const linked=transactions.filter(t=>String(t.invoiceId)===String(i.id)&&t.type==='customer_payment');return sum+(linked.length?linked.reduce((s,t)=>s+(Number(t.amount)||0),0):Math.max(0,Number(i.paidAmount)||0));},0)+transactions.filter(t=>t.type==='customer_payment'&&!t.invoiceId&&t.createdAt>=monthStart).reduce((s,t)=>s+(Number(t.amount)||0),0);
   const expenses=transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+(t.amount||0),0);
   const expensesMonth=transactions.filter(t=>t.type==='expense'&&t.createdAt>=monthStart).reduce((s,t)=>s+(t.amount||0),0);
   const receivable=totalReceivables(customers,invoices,transactions);

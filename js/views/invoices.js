@@ -1,5 +1,5 @@
 import { DB, getSettings } from '../db.js';
-import { money, num, dateFa, esc, toast, invoiceToImage, amountToWordsFa, printWithClass, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, showValidationErrors, todayISO } from '../utils.js';
+import { money, num, dateFa, esc, toast, invoiceToImage, amountToWordsFa, printWithClass, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, showValidationErrors, todayISO, invoicePaidAmount } from '../utils.js';
 import { INVOICE_STATUS, validateInvoice, normalizeAmountInput } from '../validators.js';
 import { navigate } from '../router.js';
 import { pageHeader, emptyState, openModal, closeModal, actionMenu, bindActionMenus } from '../components.js';
@@ -37,8 +37,8 @@ function invoiceCard(i) {
 }
 
 export async function renderInvoices(App, opts = {}) {
-  const [rows, customers, products, services, settings] = await Promise.all([
-    DB.all('invoices'), DB.all('customers'), DB.all('products'), DB.all('services'), getSettings()
+  const [rows, customers, products, services, projects, settings] = await Promise.all([
+    DB.all('invoices'), DB.all('customers'), DB.all('products'), DB.all('services'), DB.all('projects'), getSettings()
   ]);
   App.setView(`${pageHeader('فاکتورها', { action: 'فاکتور جدید', actionId: 'add' })}
     <div class="invoice-list-summary"><span><strong>${num(rows.length)}</strong> فاکتور</span><span>مجموع فروش <strong>${money(rows.filter(x => x.status !== 'cancelled').reduce((s,x)=>s+(x.total||0),0))}</strong></span></div>
@@ -74,6 +74,7 @@ export async function renderInvoices(App, opts = {}) {
       <form id="invoice-form" class="invoice-editor" novalidate>
         <div class="form-grid">
           <div class="field"><label>مشتری</label><select name="customerId"><option value="">مشتری آزاد</option>${customers.map(c=>`<option value="${c.id}" ${String(existing?.customerId ?? preselected)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+          <div class="field"><label>پروژه</label><select name="projectId"><option value="">بدون پروژه</option>${projects.map(p=>`<option value="${p.id}" ${String(existing?.projectId||'')===String(p.id)?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>
           <div class="field"><label>تاریخ</label><input name="date" type="date" value="${existing?.date || (existing?.createdAt ? new Date(existing.createdAt).toISOString().slice(0,10) : todayISO())}"></div>
           <div class="field"><label>وضعیت</label><select name="status">${INVOICE_STATUS.map(s=>`<option value="${s}" ${(existing?.status||'issued')===s?'selected':''}>${faLabel(INVOICE_STATUS_LABELS,s)}</option>`).join('')}</select></div>
         </div>
@@ -103,13 +104,13 @@ export async function renderInvoices(App, opts = {}) {
     const refreshTotals=()=>{const its=readItems(),d=Number(normalizeAmountInput(f.discount.value))||0,z=calculateTotals(its,d,settings.taxEnabled,settings.taxPercent);m.querySelector('#subtotal').textContent=money(z.subtotal);m.querySelector('#discount-preview').textContent=money(z.discount);m.querySelector('#sum').textContent=money(z.total);m.querySelector('#sticky-sum').textContent=money(z.total);if(settings.taxEnabled){m.querySelector('#tax-preview').value=money(z.tax);m.querySelector('#tax-total').textContent=money(z.tax);}return z;};
     if(existing?.items?.length) existing.items.forEach(addRow); else addRow();
     m.querySelector('#add-item').onclick=()=>addRow(); f.discount.oninput=refreshTotals; m.querySelector('.close').onclick=closeModal; m.querySelector('#save-invoice').onclick=()=>f.requestSubmit(); refreshTotals();
-    f.onsubmit=async e=>{e.preventDefault();const its=readItems(),rawDiscount=Number(normalizeAmountInput(f.discount.value))||0,z=calculateTotals(its,rawDiscount,settings.taxEnabled,settings.taxPercent),fd=Object.fromEntries(new FormData(f));const paidAmount=Math.round(Number(normalizeAmountInput(fd.paidAmount))||0);const data={invoiceNumber:existing?.number||nextNumber().number,customerId:fd.customerId?Number(fd.customerId):null,date:fd.date,items:its,discount:z.discount,tax:z.tax,paidAmount,status:deriveInvoiceStatus(fd.status,paidAmount,z.total),total:z.total,allowOverpayment:false};const v=validateInvoice(data);if(showValidationErrors(f,v))return;if(!existing&&rows.some(x=>String(x.number)===String(data.invoiceNumber))){toast('شماره فاکتور تکراری است.','error');return;}const customer=customers.find(c=>c.id===data.customerId);const row={...(existing||{}),number:data.invoiceNumber,seq:existing?.seq||nextNumber().seq,customerId:data.customerId,customerName:customer?.name||'مشتری آزاد',items:its,discount:data.discount,tax:data.tax,total:data.total,paidAmount:data.paidAmount,status:data.status,notes:fd.notes||'',date:data.date,createdAt:existing?.createdAt||new Date(fd.date).getTime()};if(existing){await DB.put('invoices',row);}else{row.id=await DB.add('invoices',row);}closeModal();toast(existing?'فاکتور ویرایش شد':'فاکتور ثبت شد');navigate(`#/invoices/${row.id}`);};
+    f.onsubmit=async e=>{e.preventDefault();const its=readItems(),rawDiscount=Number(normalizeAmountInput(f.discount.value))||0,z=calculateTotals(its,rawDiscount,settings.taxEnabled,settings.taxPercent),fd=Object.fromEntries(new FormData(f));let paidAmount=Math.round(Number(normalizeAmountInput(fd.paidAmount))||0);const data={invoiceNumber:existing?.number||nextNumber().number,customerId:fd.customerId?Number(fd.customerId):null,projectId:fd.projectId?Number(fd.projectId):null,date:fd.date,items:its,discount:z.discount,tax:z.tax,paidAmount,status:deriveInvoiceStatus(fd.status,paidAmount,z.total),total:z.total,allowOverpayment:false};const v=validateInvoice(data);if(showValidationErrors(f,v))return;if(!existing&&rows.some(x=>String(x.number)===String(data.invoiceNumber))){toast('شماره فاکتور تکراری است.','error');return;}const txs=await DB.all('transactions');const linked=existing?txs.filter(t=>String(t.invoiceId)===String(existing.id)&&t.type==='customer_payment'):[];const recorded=linked.length?linked.reduce((sum,t)=>sum+(Number(t.amount)||0),0):Math.max(0,Number(existing?.paidAmount)||0);if(existing&&paidAmount<recorded){toast('مبلغ پرداخت‌شده قبلی قابل کاهش نیست. برای اصلاح از ثبت اصلاحی/برگشت وجه استفاده کنید.','error');return;}const customer=customers.find(c=>c.id===data.customerId);const row={...(existing||{}),number:data.invoiceNumber,seq:existing?.seq||nextNumber().seq,customerId:data.customerId,projectId:data.projectId,customerName:customer?.name||'مشتری آزاد',items:its,discount:data.discount,tax:data.tax,total:data.total,paidAmount:data.paidAmount,status:data.status,notes:fd.notes||'',date:data.date,createdAt:existing?.createdAt||new Date(fd.date).getTime()};if(existing){await DB.put('invoices',row);}else{row.id=await DB.add('invoices',row);}const delta=Math.max(0,paidAmount-recorded);if(delta>0){await DB.add('transactions',{type:'customer_payment',amount:delta,customerId:data.customerId,invoiceId:row.id,party:customer?.name||'مشتری آزاد',description:'دریافت هنگام ثبت/ویرایش فاکتور',projectId:row.projectId||null,createdAt:new Date(fd.date).getTime()});}if(existing&&linked.length===0&&recorded>0){/* legacy paidAmount remains the fallback until a linked transaction is created */}closeModal();toast(existing?'فاکتور ویرایش شد':'فاکتور ثبت شد');navigate(`#/invoices/${row.id}`);};
   }
 }
 
 export async function renderInvoiceDetail(App, params) {
   const id=Number(params.id);
-  const [invoice,settings,customer]=await Promise.all([DB.get('invoices',id),getSettings(), DB.get('customers', id)]);
+  const [invoice,settings,customer,transactions]=await Promise.all([DB.get('invoices',id),getSettings(), DB.get('customers', id), DB.all('transactions')]);
   if(!invoice){
     App.setView(`${emptyState('فاکتور پیدا نشد','این فاکتور وجود ندارد.')}<button class="btn btn-secondary" data-route="#/invoices">بازگشت به فاکتورها</button>`);
     return;
@@ -117,7 +118,8 @@ export async function renderInvoiceDetail(App, params) {
   const [allCustomers]=await Promise.all([DB.all('customers')]);
   const actualCustomer=allCustomers.find(c=>String(c.id)===String(invoice.customerId))||null;
   const computed=calculateTotals(invoice.items||[],invoice.discount||0,settings.taxEnabled,settings.taxPercent);
-  const repaired={...invoice,discount:computed.discount,tax:computed.tax,total:computed.total,paidAmount:Math.min(Math.max(0,Math.round(Number(invoice.paidAmount)||0)),computed.total),status:deriveInvoiceStatus(invoice.status,invoice.paidAmount,computed.total)};
+  const effectivePaid=Math.min(Math.max(0,Math.round(invoicePaidAmount(invoice,transactions))),computed.total);
+  const repaired={...invoice,discount:computed.discount,tax:computed.tax,total:computed.total,paidAmount:effectivePaid,status:deriveInvoiceStatus(invoice.status,effectivePaid,computed.total)};
   const balance=Math.max(0,repaired.total-repaired.paidAmount);
   if(invoice.status!=='cancelled' && (invoice.total!==repaired.total || invoice.discount!==repaired.discount || invoice.tax!==repaired.tax || invoice.paidAmount!==repaired.paidAmount || invoice.status!==repaired.status)) {
     await DB.put('invoices',{...repaired,updatedAt:Date.now()});
@@ -142,7 +144,7 @@ export async function renderInvoiceDetail(App, params) {
     const remaining=Math.max(0,(current.total||0)-(current.paidAmount||0));
     const m=openModal(`<div class="modal-head"><h3>ثبت دریافت</h3><button class="close">${icon('x','')}</button></div><form id="payment-form" class="form-grid" novalidate><div class="field full"><label>مانده فاکتور</label><input value="${money(remaining)}" disabled></div><div class="field full"><label>مبلغ دریافت</label><input name="amount" type="text" inputmode="decimal" autofocus value="${remaining||''}"></div><div class="field full"><label>توضیحات</label><input name="notes" placeholder="مثلاً کارت به کارت"></div><div class="field full"><button class="btn btn-primary btn-block">${icon('check','')}ثبت دریافت</button></div></form>`);
     const f=m.querySelector('#payment-form');m.querySelector('.close').onclick=closeModal;
-    f.onsubmit=async e=>{e.preventDefault();const amount=Math.round(Number(normalizeAmountInput(new FormData(f).get('amount')))||0);if(amount<=0){toast('مبلغ دریافت باید بیشتر از صفر باشد.','error');return;}if(amount>remaining){toast('مبلغ دریافت از مانده فاکتور بیشتر است.','error');return;}const paid=(current.paidAmount||0)+amount;const status=paid>=current.total?'paid':'partially_paid';await DB.put('invoices',{...current,paidAmount:paid,status,notes:current.notes||''});closeModal();toast('دریافت ثبت شد');renderInvoiceDetail(App,{id:current.id});};
+    f.onsubmit=async e=>{e.preventDefault();const amount=Math.round(Number(normalizeAmountInput(new FormData(f).get('amount')))||0);if(amount<=0){toast('مبلغ دریافت باید بیشتر از صفر باشد.','error');return;}if(amount>remaining){toast('مبلغ دریافت از مانده فاکتور بیشتر است.','error');return;}const customerId=current.customerId?Number(current.customerId):null;const customerName=actualCustomer?.name||current.customerName||'مشتری آزاد';await DB.add('transactions',{type:'customer_payment',amount,customerId,invoiceId:current.id,party:customerName,description:new FormData(f).get('notes')||`دریافت فاکتور ${current.number}`,projectId:current.projectId||null});const paid=(current.paidAmount||0)+amount;const status=paid>=current.total?'paid':'partially_paid';await DB.put('invoices',{...current,paidAmount:paid,status,notes:current.notes||''});closeModal();toast('دریافت ثبت شد');renderInvoiceDetail(App,{id:current.id});};
   }
   document.querySelectorAll('[data-route]').forEach(b=>b.onclick=e=>{e.preventDefault();navigate(b.dataset.route)});
 }
