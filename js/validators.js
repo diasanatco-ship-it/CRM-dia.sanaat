@@ -273,9 +273,12 @@ export function validateInvoice(data = {}) {
   else if (data.items.length === 0) errors.push({ field: 'items', message: 'فاکتور باید حداقل یک قلم کالا یا خدمت داشته باشد' });
   else data.items.forEach((it, idx) => { const r = validateInvoiceItem(it); if (!r.valid) r.errors.forEach(e => errors.push({ field: `items[${idx}].${e.field}`, message: e.message })); });
 
-  const discRes = validateAmount(data.discount, 'discount'); if (!discRes.valid) errors.push(...discRes.errors);
-  const calculatedSubtotal = Array.isArray(data.items) ? data.items.reduce((s,it) => s + Math.max(0, (Number(normalizeAmountInput(it.quantity))||0) * (Number(normalizeAmountInput(it.unitPrice))||0) - (Number(normalizeAmountInput(it.discount))||0)), 0) : 0;
-  if (discRes.valid && Number(normalizeAmountInput(data.discount)) > Math.round(calculatedSubtotal)) errors.push({ field: 'discount', message: 'تخفیف کلی نمی‌تواند بیشتر از جمع اقلام باشد' });
+  const invoiceDiscountInput = data.discountInput ?? data.discount ?? 0;
+  const discRes = validateAmount(invoiceDiscountInput, 'discount'); if (!discRes.valid) errors.push(...discRes.errors);
+  if (data.discountType === 'percent' && Number(normalizeAmountInput(invoiceDiscountInput)) > 100) errors.push({ field: 'discount', message: 'درصد تخفیف نمی‌تواند بیشتر از ۱۰۰٪ باشد' });
+  const calculatedSubtotal = Array.isArray(data.items) ? data.items.reduce((s,it) => { const base=Math.max(0,(Number(normalizeAmountInput(it.quantity))||0)*(Number(normalizeAmountInput(it.unitPrice))||0)); const raw=Number(normalizeAmountInput(it.discountInput ?? it.discount))||0; const d=it.discountType==='percent'?base*Math.min(100,raw)/100:raw; return s+Math.max(0,base-Math.min(base,d)); }, 0) : 0;
+  const invoiceDiscountAmount = data.discountType === 'percent' ? calculatedSubtotal * Math.min(100, Number(normalizeAmountInput(invoiceDiscountInput))||0) / 100 : Number(normalizeAmountInput(invoiceDiscountInput))||0;
+  if (discRes.valid && invoiceDiscountAmount > Math.round(calculatedSubtotal)) errors.push({ field: 'discount', message: 'تخفیف کلی نمی‌تواند بیشتر از جمع اقلام باشد' });
   const taxRes = validateAmount(data.tax, 'tax'); if (!taxRes.valid) errors.push(...taxRes.errors);
   const paidRes = validateAmount(data.paidAmount, 'paidAmount'); if (!paidRes.valid) errors.push(...paidRes.errors);
   if (data.status && !isValidInvoiceStatus(data.status)) errors.push({ field: 'status', message: 'وضعیت فاکتور معتبر نیست' });

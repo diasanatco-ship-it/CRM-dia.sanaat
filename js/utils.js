@@ -1,5 +1,30 @@
 export const money=(n,unit='تومان')=>new Intl.NumberFormat('fa-IR').format(Math.round(Number(n)||0))+(unit?' '+unit:'');
 export const num=n=>new Intl.NumberFormat('fa-IR',{maximumFractionDigits:2}).format(Number(n)||0);
+export const formatAmountInput=value=>{
+  if(value===null||value===undefined||value==='') return '';
+  const normalized=String(value).replace(/[۰-۹٠-٩]/g,ch=>{const fa='۰۱۲۳۴۵۶۷۸۹',ar='٠١٢٣٤٥٦٧٨٩';const a=fa.indexOf(ch);if(a>-1)return String(a);const b=ar.indexOf(ch);return b>-1?String(b):ch;}).replace(/[٬,\s]/g,'');
+  const m=normalized.match(/^(\d+)(?:\.(\d{0,3}))?$/);
+  if(!m) return value;
+  const integer=new Intl.NumberFormat('fa-IR').format(Number(m[1]));
+  return m[2]!==undefined?`${integer}.${m[2]}`:integer;
+};
+export function bindAmountInput(input, options={}){
+  if(!input) return;
+  const allowDecimal=options.allowDecimal!==false;
+  const format=()=>{
+    const raw=String(input.value??'').replace(/[۰-۹٠-٩]/g,ch=>{const fa='۰۱۲۳۴۵۶۷۸۹',ar='٠١٢٣٤٥٦٧٨٩';const a=fa.indexOf(ch);if(a>-1)return String(a);const b=ar.indexOf(ch);return b>-1?String(b):ch;}).replace(/[٬,\s]/g,'');
+    if(!raw) return;
+    const clean=allowDecimal?raw.replace(/[^0-9.]/g,''):raw.replace(/\D/g,'');
+    const parts=clean.split('.');
+    const integer=parts[0]||'0';
+    const decimal=allowDecimal&&parts.length>1?parts.slice(1).join('').slice(0,3):'';
+    const formatted=new Intl.NumberFormat('fa-IR').format(Number(integer));
+    input.value=decimal!==''?`${formatted}.${decimal}`:formatted;
+  };
+  input.addEventListener('input',format);
+  input.addEventListener('blur',format);
+  if(input.value) format();
+}
 export const dateFa=d=>{if(!d)return '—';const dt=new Date(d);return Number.isNaN(dt.getTime())?'—':new Intl.DateTimeFormat('fa-IR',{year:'numeric',month:'2-digit',day:'2-digit'}).format(dt);};
 export const dateTimeFa=d=>{if(!d)return '—';const dt=new Date(d);return Number.isNaN(dt.getTime())?'—':new Intl.DateTimeFormat('fa-IR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(dt);};
 export const uid=()=>Date.now()+Math.floor(Math.random()*100000);
