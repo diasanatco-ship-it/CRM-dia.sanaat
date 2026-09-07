@@ -13,35 +13,59 @@ export function printWithClass(cls){document.body.classList.add(cls);const clean
 export async function invoiceToImage(el,name='invoice.png'){
   if(!el) throw new Error('محتوای فاکتور پیدا نشد.');
   await document.fonts?.ready;
-  const rect=el.getBoundingClientRect();
-  const scale=Math.min(3,Math.max(2.2,window.devicePixelRatio||2));
-  const clone=el.cloneNode(true);
-  clone.style.width=`${rect.width}px`;clone.style.margin='0';clone.style.boxShadow='none';clone.style.position='static';clone.style.transform='none';
-  const sourceNodes=[el,...el.querySelectorAll('*')], cloneNodes=[clone,...clone.querySelectorAll('*')];
-  const props=['box-sizing','display','position','width','height','min-height','max-width','padding','padding-top','padding-right','padding-bottom','padding-left','margin','margin-top','margin-right','margin-bottom','margin-left','border','border-top','border-right','border-bottom','border-left','border-radius','background','background-color','color','font-family','font-size','font-weight','line-height','letter-spacing','text-align','text-decoration','vertical-align','direction','white-space','overflow','flex','flex-direction','align-items','justify-content','gap','grid-template-columns','grid-template-rows','grid-column','opacity'];
-  sourceNodes.forEach((src,i)=>{const dst=cloneNodes[i];if(!dst)return;const cs=getComputedStyle(src);props.forEach(prop=>dst.style.setProperty(prop,cs.getPropertyValue(prop)));});
-  clone.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
-  const xml=new XMLSerializer().serializeToString(clone);
-  const width=Math.ceil(rect.width),height=Math.ceil(rect.height);
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#fffdfa"/><foreignObject x="0" y="0" width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;background:#fffdfa;direction:rtl;font-family:Arial,Tahoma,sans-serif;">${xml}</div></foreignObject></svg>`;
-  const rasterize=()=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>{const canvas=document.createElement('canvas');canvas.width=Math.ceil(width*scale);canvas.height=Math.ceil(height*scale);const ctx=canvas.getContext('2d');if(!ctx)return reject(new Error('Canvas در این مرورگر در دسترس نیست.'));ctx.fillStyle='#fffdfa';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.setTransform(scale,0,0,scale,0,0);ctx.drawImage(img,0,0,width,height);canvas.toBlob(b=>b?resolve(b):reject(new Error('تبدیل تصویر ناموفق بود.')),'image/png',1);};img.onerror=()=>reject(new Error('foreignObject failed'));img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);});
-  try{downloadBlob(await rasterize(),name);return;}catch(_){
-    // iOS Safari can reject SVG foreignObject. Fall back to a native canvas render.
-    const canvas=document.createElement('canvas');
-    const w=Math.max(900,Math.ceil(rect.width*2)), h=Math.max(1200,Math.ceil(rect.height*2)); canvas.width=w;canvas.height=h;
-    const ctx=canvas.getContext('2d'); if(!ctx)throw new Error('مرورگر امکان ساخت تصویر را ندارد.');
-    ctx.fillStyle='#fffdfa';ctx.fillRect(0,0,w,h);ctx.fillStyle='#263330';ctx.direction='rtl';ctx.textAlign='right';
-    const right=w-70; let y=85;
-    const text=(t,size,bold=false)=>{ctx.font=`${bold?'700':'400'} ${size}px DIAFont, Tahoma, Arial, sans-serif`;ctx.fillStyle='#263330';ctx.fillText(String(t||''),right,y);y+=size*1.75;};
-    text('فاکتور فروش',32,true); text(`شماره: ${el.querySelector('.invoice-number strong')?.textContent||''}`,20); text(`تاریخ: ${el.querySelector('.invoice-number')?.textContent?.match(/تاریخ:\s*([^\n]+)/)?.[1]||''}`,18);
-    y+=18; ctx.strokeStyle='#087f70';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(70,y);ctx.lineTo(w-70,y);ctx.stroke();y+=45;
-    text(`طرف حساب: ${el.querySelector('.invoice-meta')?.textContent?.replace(/طرف حساب/,'').trim()||'مشتری آزاد'}`,20,true);y+=10;
-    const cells=[...el.querySelectorAll('.invoice-table tbody tr')]; text('اقلام فاکتور',22,true); cells.forEach((r,i)=>{const td=[...r.children].map(x=>x.textContent.trim()); text(`${i+1}. ${td[1]||''} — ${td[2]||''} ${td[3]||''} — ${td[6]||''} تومان`,17);});
-    y+=15; ctx.strokeStyle='#dce4e0';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(70,y);ctx.lineTo(w-70,y);ctx.stroke();y+=40;
-    [...el.querySelectorAll('.invoice-summary-grid>div')].forEach(d=>{const spans=d.querySelectorAll('span,strong');if(spans.length>=2)text(`${spans[0].textContent}: ${spans[1].textContent}`,18, d.classList.contains('invoice-grand-total'));});
-    const notes=el.querySelector('.invoice-notes')?.textContent;if(notes){y+=10;text(notes,17);}
-    canvas.toBlob(b=>{if(!b)throw new Error('ساخت PNG ناموفق بود.');downloadBlob(b,name);},'image/png',1);
-  }
+  const W=1600, PAD=70, CONTENT=W-PAD*2;
+  const rows=[...el.querySelectorAll('.clean-invoice-table tbody tr')].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
+  const info=[...el.querySelectorAll('.invoice-info-card')].map(card=>({label:card.querySelector('span')?.textContent?.trim()||'',value:card.querySelector('strong')?.textContent?.trim()||'',small:card.querySelector('small')?.textContent?.trim()||''}));
+  const summary=[...el.querySelectorAll('.invoice-summary-box>div')].map(d=>({label:d.querySelector('span')?.textContent?.trim()||'',value:d.querySelector('strong')?.textContent?.trim()||'',grand:d.classList.contains('grand'),balance:d.classList.contains('balance-row')}));
+  const business=el.querySelector('.invoice-business-name')?.textContent?.trim()||'DIA Business';
+  const businessSub=el.querySelector('.invoice-business-sub')?.textContent?.trim()||'';
+  const docLabel=el.querySelector('.invoice-doc-label')?.textContent?.trim()||'فاکتور فروش';
+  const docNumber=el.querySelector('.invoice-doc-number')?.textContent?.trim()||'';
+  const words=el.querySelector('.invoice-words-block>strong')?.textContent?.trim()||'';
+  const notes=el.querySelector('.invoice-notes-block p')?.textContent?.trim()||'';
+  const footer=el.querySelector('.invoice-footer-note')?.textContent?.trim()||'';
+  const logoSrc=el.querySelector('.invoice-logo')?.getAttribute('src');
+  const lineHeight=34;
+  const wrap=(ctx,text,maxWidth)=>{const out=[];let line='';for(const word of String(text||'').split(/\s+/)){const test=line?line+' '+word:word;if(ctx.measureText(test).width<=maxWidth)line=test;else{if(line)out.push(line);line=word;}}if(line)out.push(line);return out.length?out:[''];};
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d'); if(!ctx)throw new Error('مرورگر امکان ساخت تصویر را ندارد.');
+  let H=560 + Math.max(1,rows.length)*68 + 420 + Math.ceil(words.length/75)*28 + Math.ceil(notes.length/80)*28;
+  H=Math.max(1900,Math.min(3600,H)); canvas.width=W*2; canvas.height=H*2; ctx.scale(2,2);
+  const C={text:'#263330',muted:'#6f7c77',border:'#d7e1dc',soft:'#f3f6f3',primary:'#087f70',primarySoft:'#e7f3f0',white:'#ffffff'};
+  ctx.fillStyle=C.white;ctx.fillRect(0,0,W,H);ctx.direction='rtl';ctx.textBaseline='middle';
+  const rr=(x,y,w,h,r,fill,stroke)=>{ctx.beginPath();ctx.roundRect(x,y,w,h,r);if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke()}};
+  const font=(size,bold=false)=>ctx.font=`${bold?'700':'400'} ${size}px DIAFont,Tahoma,Arial,sans-serif`;
+  const textR=(text,x,y,size,bold=false,max=Infinity)=>{font(size,bold);ctx.fillStyle=C.text;const ls=wrap(ctx,text,max);ls.forEach((line,i)=>ctx.fillText(line,x,y+i*lineHeight));return ls.length*lineHeight;};
+  // Header
+  let y=74;
+  if(logoSrc){try{const img=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=logoSrc;});rr(PAD,y-24,92,92,18,C.primarySoft);ctx.drawImage(img,PAD+10,y-14,72,72);}catch(_){} }
+  textR(business,PAD+112,y+2,34,true,700);textR(businessSub,PAD+112,y+43,17,false,700);
+  font(40,true);ctx.fillStyle=C.text;ctx.fillText(docLabel,W-PAD, y+4);
+  font(18,false);ctx.fillStyle=C.muted;ctx.fillText(docNumber,W-PAD,y+52);
+  y+=112;ctx.fillStyle=C.primary;ctx.fillRect(PAD,y,CONTENT,4);y+=34;
+  // Info cards
+  const cols=info.length>2?2:1, gap=14, iw=(CONTENT-gap*(cols-1))/cols, ih=82;
+  info.forEach((it,i)=>{const col=i%cols,row=Math.floor(i/cols),x=W-PAD-iw-col*(iw+gap);const yy=y+row*(ih+gap);rr(x,yy,iw,ih,14,C.soft,C.border);textR(it.label,x+iw-18,yy+25,15,false,iw-36);textR(it.value,x+iw-18,yy+52,19,true,iw-36);if(it.small)textR(it.small,x+18,yy+52,13,false,iw-36);});
+  y+=Math.ceil(info.length/cols)*(ih+gap)+28;
+  font(20,true);ctx.fillStyle=C.text;ctx.fillText('جزئیات فاکتور',W-PAD,y);y+=28;
+  // Table
+  const tw=[72,430,120,120,255,220,255], headers=['ردیف','شرح کالا / خدمت','تعداد','واحد','قیمت واحد','تخفیف','مبلغ'];
+  const tableX=PAD, tableW=tw.reduce((a,b)=>a+b,0), th=52, rh=64;
+  rr(tableX,y,tableW,th+Math.max(1,rows.length)*rh,12,C.white,C.border);ctx.save();ctx.beginPath();ctx.roundRect(tableX,y,tableW,th+Math.max(1,rows.length)*rh,12);ctx.clip();ctx.fillStyle=C.soft;ctx.fillRect(tableX,y,tableW,th);ctx.restore();
+  let x=tableX; for(let i=0;i<tw.length;i++){const w=tw[i], center=x+w/2; font(15,true);ctx.fillStyle=C.text;ctx.textAlign='center';ctx.fillText(headers[i],center,y+th/2);ctx.strokeStyle=C.border;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+th+Math.max(1,rows.length)*rh);ctx.stroke();x+=w;}ctx.textAlign='right';
+  rows.forEach((r,ri)=>{const yy=y+th+ri*rh;ctx.strokeStyle=C.border;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(tableX,yy);ctx.lineTo(tableX+tableW,yy);ctx.stroke();let xx=tableX;r.forEach((val,ci)=>{const w=tw[ci], align=(ci===1?'right':'center');ctx.textAlign=align;font(14,ci===6);ctx.fillStyle=C.text;const tx=ci===1?xx+w-12:xx+w/2;const ls=wrap(ctx,val,ci===1?w-24:w-12);ls.slice(0,2).forEach((ln,j)=>ctx.fillText(ln,tx,yy+rh/2+(j-(ls.length>1?.5:0))*22));xx+=w;});});
+  y+=th+Math.max(1,rows.length)*rh+22;
+  // Bottom blocks
+  const leftW=CONTENT-390-gap, rightW=390, bx=PAD, rx=W-PAD-rightW, bh=230;
+  rr(bx,y,leftW,bh,14,C.soft,C.border);textR('مبلغ به حروف',bx+leftW-20,y+30,14,false,leftW-40);textR(words,bx+leftW-20,y+70,19,true,leftW-40);
+  if(notes){font(14,false);ctx.fillStyle=C.muted;ctx.fillText('توضیحات',bx+leftW-20,y+142);textR(notes,bx+leftW-20,y+178,15,false,leftW-40);}
+  rr(rx,y,rightW,bh,14,C.white,C.border);summary.forEach((it,i)=>{const yy=y+16+i*38;if(it.grand){ctx.fillStyle=C.primarySoft;ctx.fillRect(rx,yy-18,rightW,48);}font(it.grand?17:14,it.grand);ctx.fillStyle=it.grand?C.primary:C.text;ctx.textAlign='right';ctx.fillText(it.label,rx+rightW-16,yy);ctx.textAlign='left';ctx.fillText(it.value,rx+16,yy);});
+  y+=bh+24;
+  rr(PAD,y,CONTENT,48,10,C.soft);font(14,false);ctx.fillStyle=C.muted;ctx.textAlign='center';ctx.fillText(footer,W/2,y+24);y+=82;
+  // signatures
+  const sw=(CONTENT-40)/2;[['امضای خریدار',PAD],['مهر و امضای فروشنده',PAD+sw+40]].forEach(([label,x0])=>{font(14,true);ctx.fillStyle=C.text;ctx.textAlign='center';ctx.fillText(label,x0+sw/2,y);ctx.strokeStyle='#b9c4bf';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x0+30,y+54);ctx.lineTo(x0+sw-30,y+54);ctx.stroke();});
+  canvas.height=Math.min(canvas.height,Math.ceil((y+100)*2));
+  canvas.toBlob(b=>{if(!b)throw new Error('ساخت PNG ناموفق بود.');downloadBlob(b,name);},'image/png',1);
 }
 
 const Y=['','یک','دو','سه','چهار','پنج','شش','هفت','هشت','نه'],D19=['ده','یازده','دوازده','سیزده','چهارده','پانزده','شانزده','هفده','هجده','نوزده'],D=['','','بیست','سی','چهل','پنجاه','شصت','هفتاد','هشتاد','نود'],H=['','صد','دویست','سیصد','چهارصد','پانصد','ششصد','هفتصد','هشتصد','نهصد'],S=['','هزار','میلیون','میلیارد','هزار میلیارد','میلیون میلیارد'];
