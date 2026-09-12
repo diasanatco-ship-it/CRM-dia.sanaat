@@ -69,3 +69,31 @@ body{padding:0}button,input,select,textarea{font:inherit}button{cursor:pointer}b
 @media print{.invoice-paper{box-shadow:none!important;border:0!important;border-radius:0!important}}
 .project-mini-stats{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;font-size:11px;color:var(--muted)}
 .project-mini-stats span{background:var(--surface-2,#f3f6f5);border-radius:999px;padding:4px 7px}
+
+/* DIA 2.7 — Persian invoice date + traditional A4 invoice layout */
+.jalali-date-picker{display:grid;grid-template-columns:1fr 1.35fr .85fr;gap:7px}.jalali-date-picker select{min-width:0}.field-hint{font-size:10px;color:var(--c-muted);margin-top:2px}
+.invoice-brand-row-classic{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;padding-bottom:8px}.invoice-brand-row-classic .invoice-brand{justify-self:center;text-align:center;flex-direction:column;gap:5px}.invoice-brand-row-classic .invoice-logo{width:58px;height:58px;border-radius:0;object-fit:contain}.invoice-brand-row-classic .invoice-title-block{justify-self:end;text-align:right}.invoice-side-label{text-align:left;justify-self:start;color:#6c7773}.invoice-side-label span{display:block;font-size:11px;font-weight:900;color:#25332f}.invoice-side-label small{display:block;font-size:8px;margin-top:4px}.invoice-parties-grid{display:grid;grid-template-columns:1fr 1fr 210px;gap:8px;margin-top:4px}.invoice-party-card,.invoice-meta-card,.invoice-project-card{border:1px solid #cfd7d3;background:#fff}.invoice-party-card{min-height:94px;padding:10px 12px}.invoice-party-title{font-size:9px;font-weight:900;color:#68746f;margin-bottom:5px}.invoice-party-card strong{display:block;font-size:11px;margin-bottom:5px}.invoice-party-card span{display:block;font-size:8px;line-height:1.8;color:#4d5854;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.invoice-meta-card{padding:10px 12px;display:grid;align-content:center;gap:10px}.invoice-meta-card>div{display:flex;justify-content:space-between;gap:8px;align-items:center}.invoice-meta-card span{font-size:8px;color:#6c7773}.invoice-meta-card strong{font-size:10px}.invoice-project-card{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:0;margin-top:8px;background:#fafbfa}.invoice-project-card>div{padding:8px 10px;border-left:1px solid #d8dfdc;min-width:0}.invoice-project-card>div:last-child{border-left:0}.invoice-project-card span{display:block;font-size:8px;color:#707b77;margin-bottom:3px}.invoice-project-card strong{display:block;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.invoice-payment-note{margin-top:9px;padding:7px 10px;border:1px solid #d7dfdb;background:#fafbfa;font-size:8px;color:#5d6965}.invoice-payment-note strong{color:#263330}
+@media(max-width:560px){.invoice-brand-row-classic{grid-template-columns:1fr 1fr;gap:10px}.invoice-brand-row-classic .invoice-brand{grid-column:1/-1;grid-row:1}.invoice-brand-row-classic .invoice-title-block{grid-column:2;grid-row:2;justify-self:end}.invoice-brand-row-classic .invoice-side-label{grid-column:1;grid-row:2}.invoice-parties-grid{grid-template-columns:1fr 1fr}.invoice-meta-card{grid-column:1/-1}.invoice-project-card{grid-template-columns:1fr 1fr}.invoice-project-card .project-description{grid-column:1/-1;border-left:0;border-top:1px solid #d8dfdc}.invoice-paper{padding:12px}.invoice-logo{width:52px!important;height:52px!important}}
+
+/* v2.7 Freeze Hardening — iOS UX */
+body.modal-open{overflow:hidden}
+.modal{padding-bottom:calc(16px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+.modal-head{position:sticky;top:-16px;z-index:3;background:var(--c-surface);padding:4px 0 10px}
+.invoice-editor{padding-bottom:118px}
+.sticky-invoice-footer{padding-bottom:max(10px,env(safe-area-inset-bottom))}
+.sticky-invoice-inner .btn-primary{min-width:150px}
+.field-hint{line-height:1.7}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid rgba(8,127,112,.18);outline-offset:1px}
+.invoice-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.clean-invoice-table th,.clean-invoice-table td{overflow-wrap:anywhere}
+@media(max-width:430px){
+ .view{padding-left:12px;padding-right:12px}
+ .page-title-row .btn{padding-inline:10px}
+ .sticky-invoice-inner{gap:8px}
+ .sticky-invoice-inner .btn-primary{min-width:0;flex:1}
+ .sticky-total{min-width:0}
+ .sticky-total strong{font-size:15px}
+ .invoice-editor{padding-bottom:122px}
+ .invoice-action-bar{margin-top:0}
+ .invoice-paper{overflow:hidden}
+}
