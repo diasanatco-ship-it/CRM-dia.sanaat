@@ -183,7 +183,10 @@ export async function invoiceToImage(el,name='invoice.jpg'){
   // Table.
   const widths=[52,150,130,170,82,82,458]; // physical LTR: row, total, discount, unit price, unit, qty, description (description ends up on the RTL right)
   const tableX=PAD, tableW=widths.reduce((a,b)=>a+b,0);
-  const numericCol=i=>i===0||i===1||i===2||i===4||i===5;
+  // Numeric font is chosen per cell from its actual content (same rule used everywhere
+  // else in this renderer), not from a fixed column index — a fixed index list here had
+  // "قیمت واحد" (a number) rendered in the text font and "واحد" (a text label) rendered
+  // in the number font, which is the mismatch users saw between the app and the exported image.
   const rowHeights=rows.length?rows.map(r=>{const desc=wrap(r[1],widths[6]-18,13,true,false);const unit=wrap(r[3],widths[4]-10,13,false,false);return Math.max(62,24+Math.max(desc.length,unit.length)*18);}):[62];
   const tableH=headH+rowHeights.reduce((a,b)=>a+b,0);
   box(tableX,y,tableW,tableH,C.white,C.black,1.2);
@@ -192,7 +195,7 @@ export async function invoiceToImage(el,name='invoice.jpg'){
   let x=tableX;
   headers.forEach((h,i)=>{const w=widths[i];textC(h,x+w/2,y+headH/2,13,true,C.black);if(i>0)line(x,y,x,y+tableH,1,C.line);x+=w;});
   let rowY=y+headH;
-  rows.forEach((r,ri)=>{const rh=rowHeights[ri];line(tableX,rowY,tableX+tableW,rowY,1,C.line);const cells=[r[0],r[6],r[5],r[4],r[3],r[2],r[1]];let xx=tableX;cells.forEach((v,ci)=>{const w=widths[ci];const max=ci===6?w-18:w-10;const isNum=numericCol(ci);const lines=wrap(v,max,13,ci===1||ci===6,isNum);font(13,ci===1||ci===6,isNum);ctx.fillStyle=C.text;ctx.textAlign=ci===6?'right':'center';const tx=ci===6?xx+w-9:xx+w/2;const shown=lines.slice(0,Math.max(2,Math.floor((rh-24)/18)));shown.forEach((ln,j)=>ctx.fillText(ln,tx,rowY+rh/2+(j-(shown.length>1?(shown.length-1)/2:0))*18));xx+=w;});rowY+=rh;});
+  rows.forEach((r,ri)=>{const rh=rowHeights[ri];line(tableX,rowY,tableX+tableW,rowY,1,C.line);const cells=[r[0],r[6],r[5],r[4],r[3],r[2],r[1]];let xx=tableX;cells.forEach((v,ci)=>{const w=widths[ci];const max=ci===6?w-18:w-10;const isNum=ci!==6&&containsNumber(v);const lines=wrap(v,max,13,ci===1||ci===6,isNum);font(13,ci===1||ci===6,isNum);ctx.fillStyle=C.text;ctx.textAlign=ci===6?'right':'center';const tx=ci===6?xx+w-9:xx+w/2;const shown=lines.slice(0,Math.max(2,Math.floor((rh-24)/18)));shown.forEach((ln,j)=>ctx.fillText(ln,tx,rowY+rh/2+(j-(shown.length>1?(shown.length-1)/2:0))*18));xx+=w;});rowY+=rh;});
   y+=tableH+22;
   // Totals and amount in words, matching the screenshot's two-column lower section.
   const summaryW=360, wordsW=CW-summaryW-gap, sy=y;
