@@ -93,7 +93,7 @@ export const downloadJSON=(data,name)=>downloadBlob(new Blob([JSON.stringify(dat
 export function printWithClass(cls){document.body.classList.add(cls);const cleanup=()=>{document.body.classList.remove(cls);window.removeEventListener('afterprint',cleanup)};window.addEventListener('afterprint',cleanup);setTimeout(()=>window.print(),40);}
 export async function invoiceToImage(el,name='invoice.jpg'){
   if(!el) throw new Error('محتوای فاکتور پیدا نشد.');
-  try{await document.fonts?.load('700 32px DIAFont');await document.fonts?.load('400 20px DIAFont');await document.fonts?.ready;}catch(_){}
+  try{await document.fonts?.load('700 32px DIAFont');await document.fonts?.load('400 20px DIAFont');await document.fonts?.load('700 20px DIANum');await document.fonts?.load('400 20px DIANum');await document.fonts?.ready;}catch(_){}
   const clean=t=>String(t??'').replace(/\s+/g,' ').trim();
   const rows=[...el.querySelectorAll('.clean-invoice-table tbody tr')].map(tr=>[...tr.children].map(td=>clean(td.textContent))).filter(r=>r.length>=7);
   const summary=[...el.querySelectorAll('.invoice-summary-box>div')].map(d=>({label:clean(d.querySelector('span')?.textContent),value:clean(d.querySelector('strong')?.textContent),grand:d.classList.contains('grand'),balance:d.classList.contains('balance-row')}));
@@ -115,31 +115,34 @@ export async function invoiceToImage(el,name='invoice.jpg'){
   const footer=clean(el.querySelector('.invoice-footer-note')?.textContent);
   const logoSrc=el.querySelector('.invoice-logo')?.getAttribute('src');
   const W=1240, PAD=58, CW=W-PAD*2;
-  const rowH=62, headH=58;
+  const headH=58;
   const estimatedRows=Math.max(1,rows.length);
+  const estimatedRowHeight=rows.length?rows.reduce((sum,r)=>{const d=clean(r[1]);return sum+Math.max(62,24+Math.max(1,Math.ceil(d.length/48))*18)},0):62;
   const estimatedWordLines=Math.max(1,Math.ceil(words.length/48));
   const estimatedNoteLines=notes?Math.max(1,Math.ceil(notes.length/55)):0;
-  let H=980 + estimatedRows*rowH + (projectParts.length?115:0) + Math.min(340,80+estimatedWordLines*28+estimatedNoteLines*25) + (footer?68:0) + 110;
+  let H=1100 + estimatedRowHeight + (projectParts.length?115:0) + Math.min(340,80+estimatedWordLines*28+estimatedNoteLines*25) + (footer?68:0) + 110;
   H=Math.max(1500,Math.min(3200,H));
   const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
   const ctx=canvas.getContext('2d');if(!ctx)throw new Error('مرورگر امکان ساخت تصویر فاکتور را ندارد.');
   const C={black:'#151918',text:'#252b29',muted:'#69726f',line:'#b9c0bd',soft:'#f6f7f6',accent:'#087f70',accentSoft:'#e9f4f1',white:'#ffffff'};
   ctx.fillStyle=C.white;ctx.fillRect(0,0,W,H);ctx.direction='rtl';ctx.textBaseline='middle';
-  const font=(size,bold=false)=>{ctx.font=`${bold?'700':'400'} ${size}px DIAFont,Tahoma,Arial,sans-serif`;};
-  const wrap=(text,max,size=20,bold=false)=>{font(size,bold);const words=clean(text).split(' ');const out=[];let line='';for(const word of words){const test=line?`${line} ${word}`:word;if(ctx.measureText(test).width<=max)line=test;else{if(line)out.push(line);line=word;}}if(line)out.push(line);return out.length?out:[''];};
-  const textR=(text,x,y,size,bold=false,fill=C.text,max=CW)=>{font(size,bold);ctx.fillStyle=fill;ctx.textAlign='right';const lines=wrap(text,max,size,bold);lines.forEach((ln,i)=>ctx.fillText(ln,x,y+i*29));return lines.length*29;};
-  const textC=(text,x,y,size,bold=false,fill=C.text)=>{font(size,bold);ctx.fillStyle=fill;ctx.textAlign='center';ctx.fillText(clean(text),x,y);};
-  const textL=(text,x,y,size,bold=false,fill=C.text)=>{font(size,bold);ctx.fillStyle=fill;ctx.textAlign='left';ctx.fillText(clean(text),x,y);};
+  const font=(size,bold=false,numeric=false)=>{ctx.font=`${bold?'700':'400'} ${size}px ${numeric?'DIANum':'DIAFont'},Tahoma,Arial,sans-serif`;};
+  const wrap=(text,max,size=20,bold=false,numeric=false)=>{font(size,bold,numeric);const words=clean(text).split(' ');const out=[];let line='';for(const word of words){const test=line?`${line} ${word}`:word;if(ctx.measureText(test).width<=max)line=test;else{if(line)out.push(line);line=word;}}if(line)out.push(line);return out.length?out:[''];};
+  const textR=(text,x,y,size,bold=false,fill=C.text,max=CW,numeric=false)=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='right';const lines=wrap(text,max,size,bold,numeric);lines.forEach((ln,i)=>ctx.fillText(ln,x,y+i*29));return lines.length*29;};
+  const textC=(text,x,y,size,bold=false,fill=C.text,numeric=false)=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='center';ctx.fillText(clean(text),x,y);};
+  const textL=(text,x,y,size,bold=false,fill=C.text,numeric=false)=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='left';ctx.fillText(clean(text),x,y);};
   const line=(x1,y1,x2,y2,w=1,stroke=C.line)=>{ctx.strokeStyle=stroke;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
   const box=(x,y,w,h,fill=C.white,stroke=C.line,lw=1)=>{ctx.fillStyle=fill;ctx.fillRect(x,y,w,h);ctx.strokeStyle=stroke;ctx.lineWidth=lw;ctx.strokeRect(x,y,w,h);};
-  const logo=async()=>{if(!logoSrc)return;try{const img=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=logoSrc;});const size=82;ctx.drawImage(img,W-PAD-size,48,size,size);}catch(_) {}};
+  const logo=async()=>{if(!logoSrc)return;try{const img=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=logoSrc;});const size=64;ctx.drawImage(img,W/2-size/2,18,size,size);}catch(_) {}};
   await logo();
-  // Header: close to a traditional Iranian A4 invoice — logo right, title centered, page marker left.
-  textR(business,W-PAD-108,62,26,true,C.black);textR(businessSub,W-PAD-108,98,14,false,C.muted,700);
-  textC(docLabel,W/2,69,34,true,C.black);textC(docNumber,W/2,111,16,false,C.muted);
+  // Header mirrors the on-screen invoice: business identity is centered, the document title is a separate block below it.
+  // This avoids the common visual collision where "فاکتور فروش" and the company name read as one heading.
   textL('نسخه مشتری',PAD,63,17,true,C.black);textL('سیستم حسابداری DIA',PAD,96,13,true,C.muted);
-  line(PAD,148,W-PAD,148,1.4,C.black);
-  let y=170;
+  textC(business,W/2,102,26,true,C.black);textC(businessSub,W/2,132,14,false,C.muted);
+  line(PAD,160,W-PAD,160,1,C.line);
+  textC(docLabel,W/2,202,32,true,C.black);textC(docNumber,W/2,237,16,false,C.muted);
+  line(PAD,272,W-PAD,272,1.4,C.black);
+  let y=294;
   // Seller / buyer / invoice metadata block.
   const gap=14, metaW=230, partyW=(CW-metaW-gap)/2;
   const bx=PAD, sx=PAD+partyW+gap, mx=W-PAD-metaW;
@@ -152,13 +155,17 @@ export async function invoiceToImage(el,name='invoice.jpg'){
   textR('شرح کالا و خدمات',W-PAD,y+18,17,true,C.black);y+=45;
   // Table.
   const widths=[52,150,130,170,82,82,458]; // physical LTR: row, total, discount, unit price, unit, qty, description (description ends up on the RTL right)
-  const tableX=PAD, tableW=widths.reduce((a,b)=>a+b,0), tableH=headH+Math.max(1,rows.length)*rowH;
+  const tableX=PAD, tableW=widths.reduce((a,b)=>a+b,0);
+  const numericCol=i=>i===0||i===1||i===2||i===4||i===5;
+  const rowHeights=rows.length?rows.map(r=>{const desc=wrap(r[1],widths[6]-18,13,true,false);const unit=wrap(r[3],widths[4]-10,13,false,false);return Math.max(62,24+Math.max(desc.length,unit.length)*18);}):[62];
+  const tableH=headH+rowHeights.reduce((a,b)=>a+b,0);
   box(tableX,y,tableW,tableH,C.white,C.black,1.2);
   ctx.fillStyle=C.soft;ctx.fillRect(tableX,y,tableW,headH);
   const headers=['ردیف','مبلغ','تخفیف','قیمت واحد','واحد','تعداد','شرح کالا / خدمت'];
   let x=tableX;
   headers.forEach((h,i)=>{const w=widths[i];textC(h,x+w/2,y+headH/2,13,true,C.black);if(i>0)line(x,y,x,y+tableH,1,C.line);x+=w;});
-  rows.forEach((r,ri)=>{const yy=y+headH+ri*rowH;line(tableX,yy,tableX+tableW,yy,1,C.line);const cells=[r[0],r[6],r[5],r[4],r[3],r[2],r[1]];let xx=tableX;cells.forEach((v,ci)=>{const w=widths[ci];const max=ci===6?w-18:w-10;const lines=wrap(v,max,13,ci===1||ci===6);font(13,ci===1||ci===6);ctx.fillStyle=C.text;ctx.textAlign=ci===6?'right':'center';const tx=ci===6?xx+w-9:xx+w/2;lines.slice(0,2).forEach((ln,j)=>ctx.fillText(ln,tx,yy+rowH/2+(j-(lines.length>1?.5:0))*18));xx+=w;});});
+  let rowY=y+headH;
+  rows.forEach((r,ri)=>{const rh=rowHeights[ri];line(tableX,rowY,tableX+tableW,rowY,1,C.line);const cells=[r[0],r[6],r[5],r[4],r[3],r[2],r[1]];let xx=tableX;cells.forEach((v,ci)=>{const w=widths[ci];const max=ci===6?w-18:w-10;const isNum=numericCol(ci);const lines=wrap(v,max,13,ci===1||ci===6,isNum);font(13,ci===1||ci===6,isNum);ctx.fillStyle=C.text;ctx.textAlign=ci===6?'right':'center';const tx=ci===6?xx+w-9:xx+w/2;const shown=lines.slice(0,Math.max(2,Math.floor((rh-24)/18)));shown.forEach((ln,j)=>ctx.fillText(ln,tx,rowY+rh/2+(j-(shown.length>1?(shown.length-1)/2:0))*18));xx+=w;});rowY+=rh;});
   y+=tableH+22;
   // Totals and amount in words, matching the screenshot's two-column lower section.
   const summaryW=360, wordsW=CW-summaryW-gap, sy=y;
@@ -168,7 +175,7 @@ export async function invoiceToImage(el,name='invoice.jpg'){
   box(PAD,sy,wordsW,sh,C.white,C.line);box(W-PAD-summaryW,sy,summaryW,sh,C.white,C.line);
   textR('مبلغ به حروف',PAD+wordsW-16,sy+25,13,true,C.muted);let wy=sy+61;for(const ln of wrap(words,wordsW-32).slice(0,5)){textR(ln,PAD+wordsW-16,wy,16,true,C.black,wordsW-32);wy+=28;}
   if(notes){textR('توضیحات و شرایط',PAD+wordsW-16,sy+150,13,true,C.muted);let ny=sy+183;for(const ln of wrap(notes,wordsW-32).slice(0,3)){textR(ln,PAD+wordsW-16,ny,13,false,C.text,wordsW-32);ny+=24;}}
-  let yy=sy+15;summary.forEach(it=>{const h=it.grand?49:34;if(it.grand){ctx.fillStyle=C.accentSoft;ctx.fillRect(W-PAD-summaryW,yy,summaryW,h);}textR(it.label,W-PAD-16,yy+h/2,13,it.grand,C.muted);textL(it.value,W-PAD-summaryW+16,yy+h/2,14,it.grand,it.grand?C.accent:C.black);yy+=h;});
+  let yy=sy+15;summary.forEach(it=>{const h=it.grand?49:34;if(it.grand){ctx.fillStyle=C.accentSoft;ctx.fillRect(W-PAD-summaryW,yy,summaryW,h);}textR(it.label,W-PAD-16,yy+h/2,13,it.grand,C.muted);textL(it.value,W-PAD-summaryW+16,yy+h/2,14,it.grand,it.grand?C.accent:C.black,true);yy+=h;});
   y+=sh+24;
   if(footer){box(PAD,y,CW,46,C.soft,C.soft);textC(footer,W/2,y+23,12,false,C.muted);y+=68;}
   // Signatures.
