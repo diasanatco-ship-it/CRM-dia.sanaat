@@ -1,18 +1,18 @@
 import { DB } from '../db.js';
-import { money, num, dateFa, esc, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, totalReceivables, financialSummary } from '../utils.js';
+import { money, num, dateFa, esc, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, totalReceivables, financialSummary, dateToTimestamp, isExpenseType } from '../utils.js';
 import { pageHeader } from '../components.js';
 import { navigate } from '../router.js';
 
 export async function renderDashboard(App) {
   const [invoices,transactions,products,customers]=await Promise.all([DB.all('invoices'),DB.all('transactions'),DB.all('products'),DB.all('customers')]);
-  const now=new Date(); const monthStart=new Date(now.getFullYear(),now.getMonth(),1).getTime();
+  const now=new Date(); const monthStart=new Date(now.getFullYear(),now.getMonth(),1).getTime(); const inMonth=d=>{const t=dateToTimestamp(d);return Number.isFinite(t)&&t>=monthStart;};
   const valid=invoices.filter(i=>i.status!=='cancelled');
   const sales=valid.reduce((s,i)=>s+(i.total||0),0);
-  const salesMonth=valid.filter(i=>i.createdAt>=monthStart).reduce((s,i)=>s+(i.total||0),0);
+  const salesMonth=valid.filter(i=>inMonth(i.date||i.createdAt)).reduce((s,i)=>s+(i.total||0),0);
   const received=financialSummary(invoices,transactions).received;
-  const receivedMonth=valid.filter(i=>i.createdAt>=monthStart).reduce((sum,i)=>{const linked=transactions.filter(t=>String(t.invoiceId)===String(i.id)&&t.type==='customer_payment');return sum+(linked.length?linked.reduce((s,t)=>s+(Number(t.amount)||0),0):Math.max(0,Number(i.paidAmount)||0));},0)+transactions.filter(t=>t.type==='customer_payment'&&!t.invoiceId&&t.createdAt>=monthStart).reduce((s,t)=>s+(Number(t.amount)||0),0);
-  const expenses=transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+(t.amount||0),0);
-  const expensesMonth=transactions.filter(t=>t.type==='expense'&&t.createdAt>=monthStart).reduce((s,t)=>s+(t.amount||0),0);
+  const receivedMonth=valid.filter(i=>inMonth(i.date||i.createdAt)).reduce((sum,i)=>{const linked=transactions.filter(t=>String(t.invoiceId)===String(i.id)&&t.type==='customer_payment');return sum+(linked.length?linked.reduce((s,t)=>s+(Number(t.amount)||0),0):Math.max(0,Number(i.paidAmount)||0));},0)+transactions.filter(t=>t.type==='customer_payment'&&!t.invoiceId&&inMonth(t.date||t.createdAt)).reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const expenses=transactions.filter(t=>isExpenseType(t.type)).reduce((s,t)=>s+(t.amount||0),0);
+  const expensesMonth=transactions.filter(t=>isExpenseType(t.type)&&inMonth(t.date||t.createdAt)).reduce((s,t)=>s+(t.amount||0),0);
   const receivable=totalReceivables(customers,invoices,transactions);
   const stockValue=products.reduce((s,p)=>s+(Number(p.stock)||0)*(Number(p.purchasePrice)||0),0);
   const latest=valid.sort((a,b)=>b.createdAt-a.createdAt).slice(0,5);
@@ -26,7 +26,7 @@ export async function renderDashboard(App) {
     </div>
     <div class="section-title">دسترسی سریع</div><div class="quick-grid">${[['#/invoices','file-plus','فاکتور جدید'],['#/customers','users','مشتری جدید'],['#/accounting','wallet','ثبت تراکنش'],['#/products','box-plus','افزودن کالا'],['#/services','briefcase','افزودن خدمت'],['#/reports','chart','گزارش‌ها']].map(x=>`<button class="quick" data-route="${x[0]}"><span class="qicon">${icon(x[1],'')}</span><small>${x[2]}</small></button>`).join('')}</div>
     <div class="section-title-row"><div class="section-title-compact">آخرین فاکتورها</div><button class="btn btn-ghost" id="all-invoices">همه</button></div>
-    <div class="list dashboard-invoices">${latest.map(i=>`<button class="dashboard-invoice-card" data-invoice="${i.id}"><span class="invoice-card-icon">${icon('file-text','')}</span><span class="list-main"><strong>فاکتور ${esc(i.number)}</strong><small>${esc(i.customerName||'مشتری آزاد')} · ${dateFa(i.createdAt)}</small></span><span class="list-value">${money(i.total)}<small class="badge badge-${INVOICE_STATUS_BADGE[i.status]||'muted'}">${faLabel(INVOICE_STATUS_LABELS,i.status)}</small></span></button>`).join('')||'<div class="empty">هنوز فاکتوری ثبت نشده است.</div>'}</div>`);
+    <div class="list dashboard-invoices">${latest.map(i=>`<button class="dashboard-invoice-card" data-invoice="${i.id}"><span class="invoice-card-icon">${icon('file-text','')}</span><span class="list-main"><strong>فاکتور ${esc(i.number)}</strong><small>${esc(i.customerName||'مشتری آزاد')} · ${dateFa(i.date||i.createdAt)}</small></span><span class="list-value">${money(i.total)}<small class="badge badge-${INVOICE_STATUS_BADGE[i.status]||'muted'}">${faLabel(INVOICE_STATUS_LABELS,i.status)}</small></span></button>`).join('')||'<div class="empty">هنوز فاکتوری ثبت نشده است.</div>'}</div>`);
   document.getElementById('all-invoices').onclick=()=>navigate('#/invoices');
   document.querySelectorAll('[data-invoice]').forEach(b=>b.onclick=()=>navigate('#/invoices/'+b.dataset.invoice));
   document.querySelectorAll('[data-route]').forEach(b=>b.onclick=e=>{e.preventDefault();navigate(b.dataset.route)});
