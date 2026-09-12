@@ -3,7 +3,19 @@ export const pageHeader=(title,{back=false,action=null,actionIcon='plus',actionI
 export const emptyState=(title,text,action=null,id='')=>`<div class="empty">${icon('folder','') }<strong>${esc(title)}</strong><div>${esc(text)}</div>${action?`<button class="btn btn-secondary mt-3" id="${esc(id)}">${icon('plus','')}${esc(action)}</button>`:''}</div>`;
 export const actionMenu=(id)=>`<div class="item-actions"><button class="btn btn-ghost btn-icon menu-toggle" data-menu="${id}" aria-label="عملیات">${icon('more-vertical','')}</button><div class="action-menu" data-action-menu="${id}" hidden><button data-edit="${id}">${icon('edit','')} ویرایش</button><button class="danger" data-delete="${id}">${icon('trash','')} حذف</button></div></div>`;
 let modalEscapeBound=false;
-export function closeModal(){const r=document.getElementById('modal-root');if(r)r.innerHTML='';document.body.classList.remove('modal-open');if(modalEscapeBound){document.removeEventListener('keydown',closeOnEscape);modalEscapeBound=false;}}
+export function closeModal(){
+  const r=document.getElementById('modal-root');if(r)r.innerHTML='';
+  document.body.classList.remove('modal-open');
+  if(modalEscapeBound){document.removeEventListener('keydown',closeOnEscape);modalEscapeBound=false;}
+  // Some modals are opened via a hash query (e.g. #/invoices?edit=123). If the query is
+  // left in place after closing, tapping the same "Edit" action again sets location.hash
+  // to the exact same value, which does not fire 'hashchange' and silently fails to
+  // reopen the modal. Clearing the query on every close keeps the hash reusable.
+  if(location.hash.includes('?')){
+    const clean=location.hash.split('?')[0]||'#/dashboard';
+    history.replaceState(null,'',location.pathname+location.search+clean);
+  }
+}
 function closeOnEscape(e){if(e.key==='Escape'){e.preventDefault();closeModal();}}
 export function openModal(html){closeModal();const r=document.getElementById('modal-root');r.innerHTML=`<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true">${html}</section></div>`;document.body.classList.add('modal-open');document.addEventListener('keydown',closeOnEscape);modalEscapeBound=true;const backdrop=r.querySelector('[data-modal-backdrop]');backdrop.addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});const modal=r.querySelector('.modal');setTimeout(()=>{const target=modal?.querySelector('[autofocus]')||modal?.querySelector('input:not([disabled]),select,textarea,button');target?.focus();},30);return modal;}
 let actionMenuDocumentBound=false;

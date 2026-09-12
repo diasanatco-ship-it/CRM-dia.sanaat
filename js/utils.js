@@ -94,18 +94,17 @@ export function printWithClass(cls){document.body.classList.add(cls);const clean
 export async function invoiceToImage(el,name='invoice.jpg'){
   if(!el) throw new Error('محتوای فاکتور پیدا نشد.');
   // Canvas does not always pick up a CSS @font-face immediately on iOS/Safari.
-  // Explicitly register/load the two invoice fonts before drawing so the PNG
-  // uses the same numeric font as the live invoice UI.
+  // Explicitly register/load the Persian text font before drawing so the PNG
+  // text matches the live invoice UI. Numbers deliberately use no @font-face —
+  // they draw with the iOS/native system font stack (NUM_FONT_STACK below),
+  // which is always available and needs no loading step.
   try{
     const fontFiles={
       regular:new URL('../assets/fonts/NotoKufiArabic-Regular.ttf',import.meta.url).href,
-      bold:new URL('../assets/fonts/NotoKufiArabic-Bold.ttf',import.meta.url).href,
-      numRegular:new URL('../assets/fonts/NotoSansArabic-Regular.ttf',import.meta.url).href,
-      numBold:new URL('../assets/fonts/NotoSansArabic-Bold.ttf',import.meta.url).href
+      bold:new URL('../assets/fonts/NotoKufiArabic-Bold.ttf',import.meta.url).href
     };
     const faces=[
-      ['DIAFont',fontFiles.regular,'400'],['DIAFont',fontFiles.bold,'700'],
-      ['DIANum',fontFiles.numRegular,'400'],['DIANum',fontFiles.numBold,'700']
+      ['DIAFont',fontFiles.regular,'400'],['DIAFont',fontFiles.bold,'700']
     ];
     for(const [family,src,weight] of faces){
       const face=new FontFace(family,`url(${src})`,{weight});
@@ -113,8 +112,7 @@ export async function invoiceToImage(el,name='invoice.jpg'){
       document.fonts.add(face);
     }
     await Promise.all([
-      document.fonts.load('400 20px DIAFont'),document.fonts.load('700 20px DIAFont'),
-      document.fonts.load('400 20px DIANum'),document.fonts.load('700 20px DIANum')
+      document.fonts.load('400 20px DIAFont'),document.fonts.load('700 20px DIAFont')
     ]);
     await document.fonts.ready;
   }catch(_){
@@ -153,7 +151,10 @@ export async function invoiceToImage(el,name='invoice.jpg'){
   const C={black:'#151918',text:'#252b29',muted:'#69726f',line:'#b9c0bd',soft:'#f6f7f6',accent:'#087f70',accentSoft:'#e9f4f1',white:'#ffffff'};
   ctx.fillStyle=C.white;ctx.fillRect(0,0,W,H);ctx.direction='rtl';ctx.textBaseline='middle';
   const containsNumber=t=>/[0-9۰-۹٠-٩]/.test(String(t??''));
-  const font=(size,bold=false,numeric=false)=>{ctx.font=`${bold?'700':'400'} ${size}px ${numeric?'DIANum':'DIAFont'},Tahoma,Arial,sans-serif`;};
+  // Numeric text draws with the iOS/native system font (no bundled numeral font),
+  // matching the CSS --num-font stack used on-screen. Non-numeric text keeps DIAFont.
+  const NUM_FONT_STACK='-apple-system,BlinkMacSystemFont,"SF Pro Text",Tahoma,Arial,sans-serif';
+  const font=(size,bold=false,numeric=false)=>{ctx.font=`${bold?'700':'400'} ${size}px ${numeric?NUM_FONT_STACK:'DIAFont,Tahoma,Arial,sans-serif'}`;};
   const wrap=(text,max,size=20,bold=false,numeric=containsNumber(text))=>{font(size,bold,numeric);const words=clean(text).split(' ');const out=[];let line='';for(const word of words){const test=line?`${line} ${word}`:word;if(ctx.measureText(test).width<=max)line=test;else{if(line)out.push(line);line=word;}}if(line)out.push(line);return out.length?out:[''];};
   const textR=(text,x,y,size,bold=false,fill=C.text,max=CW,numeric=containsNumber(text))=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='right';const lines=wrap(text,max,size,bold,numeric);lines.forEach((ln,i)=>ctx.fillText(ln,x,y+i*29));return lines.length*29;};
   const textC=(text,x,y,size,bold=false,fill=C.text,numeric=containsNumber(text))=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='center';ctx.fillText(clean(text),x,y);};
