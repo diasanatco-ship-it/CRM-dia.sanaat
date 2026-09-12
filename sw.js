@@ -1,5 +1,5 @@
 // sw.js — کش‌کردن اپ برای اجرای کامل آفلاین (بدون نیاز به سرور/CDN)
-const CACHE = 'dia-business-v2-7-freeze2';
+const CACHE = 'dia-business-v2-7-freeze2-numfix';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './css/style.css', './css/print.css',
@@ -7,7 +7,7 @@ const ASSETS = [
   './js/views/dashboard.js', './js/views/customers.js', './js/views/customer-detail.js',
   './js/views/products.js', './js/views/services.js', './js/views/projects.js',
   './js/views/invoices.js', './js/views/accounting.js', './js/views/reports.js', './js/views/settings.js',
-  './assets/icon-192.png', './assets/icon-512.png', './assets/icon-maskable-512.png', './assets/apple-touch-icon.png', './assets/fonts/NotoKufiArabic-Regular.ttf', './assets/fonts/NotoKufiArabic-Bold.ttf', './assets/fonts/NotoSansArabic-Regular.ttf', './assets/fonts/NotoSansArabic-Bold.ttf', './assets/icons/search.svg', './assets/icons/plus.svg', './assets/icons/users.svg', './assets/icons/more-vertical.svg', './assets/icons/briefcase.svg', './assets/icons/settings.svg', './assets/icons/box.svg', './assets/icons/printer.svg', './assets/icons/file-plus.svg', './assets/icons/image.svg', './assets/icons/chevron-down.svg', './assets/icons/edit.svg', './assets/icons/check.svg', './assets/icons/file-text.svg', './assets/icons/box-plus.svg', './assets/icons/arrow-right.svg', './assets/icons/trash.svg', './assets/icons/download.svg', './assets/icons/home.svg', './assets/icons/more.svg', './assets/icons/wallet.svg', './assets/icons/upload.svg', './assets/icons/x.svg', './assets/icons/folder.svg', './assets/icons/chart.svg', './assets/icons/chevron-left.svg'
+  './assets/icon-192.png', './assets/icon-512.png', './assets/icon-maskable-512.png', './assets/apple-touch-icon.png', './assets/fonts/NotoKufiArabic-Regular.ttf', './assets/fonts/NotoKufiArabic-Bold.ttf', './assets/icons/search.svg', './assets/icons/plus.svg', './assets/icons/users.svg', './assets/icons/more-vertical.svg', './assets/icons/briefcase.svg', './assets/icons/settings.svg', './assets/icons/box.svg', './assets/icons/printer.svg', './assets/icons/file-plus.svg', './assets/icons/image.svg', './assets/icons/chevron-down.svg', './assets/icons/edit.svg', './assets/icons/check.svg', './assets/icons/file-text.svg', './assets/icons/box-plus.svg', './assets/icons/arrow-right.svg', './assets/icons/trash.svg', './assets/icons/download.svg', './assets/icons/home.svg', './assets/icons/more.svg', './assets/icons/wallet.svg', './assets/icons/upload.svg', './assets/icons/x.svg', './assets/icons/folder.svg', './assets/icons/chart.svg', './assets/icons/chevron-left.svg'
 ];
 
 self.addEventListener('install', e => {
