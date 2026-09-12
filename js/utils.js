@@ -93,7 +93,33 @@ export const downloadJSON=(data,name)=>downloadBlob(new Blob([JSON.stringify(dat
 export function printWithClass(cls){document.body.classList.add(cls);const cleanup=()=>{document.body.classList.remove(cls);window.removeEventListener('afterprint',cleanup)};window.addEventListener('afterprint',cleanup);setTimeout(()=>window.print(),40);}
 export async function invoiceToImage(el,name='invoice.jpg'){
   if(!el) throw new Error('محتوای فاکتور پیدا نشد.');
-  try{await document.fonts?.load('700 32px DIAFont');await document.fonts?.load('400 20px DIAFont');await document.fonts?.load('700 20px DIANum');await document.fonts?.load('400 20px DIANum');await document.fonts?.ready;}catch(_){}
+  // Canvas does not always pick up a CSS @font-face immediately on iOS/Safari.
+  // Explicitly register/load the two invoice fonts before drawing so the PNG
+  // uses the same numeric font as the live invoice UI.
+  try{
+    const fontFiles={
+      regular:new URL('../assets/fonts/NotoKufiArabic-Regular.ttf',import.meta.url).href,
+      bold:new URL('../assets/fonts/NotoKufiArabic-Bold.ttf',import.meta.url).href,
+      numRegular:new URL('../assets/fonts/NotoSansArabic-Regular.ttf',import.meta.url).href,
+      numBold:new URL('../assets/fonts/NotoSansArabic-Bold.ttf',import.meta.url).href
+    };
+    const faces=[
+      ['DIAFont',fontFiles.regular,'400'],['DIAFont',fontFiles.bold,'700'],
+      ['DIANum',fontFiles.numRegular,'400'],['DIANum',fontFiles.numBold,'700']
+    ];
+    for(const [family,src,weight] of faces){
+      const face=new FontFace(family,`url(${src})`,{weight});
+      await face.load();
+      document.fonts.add(face);
+    }
+    await Promise.all([
+      document.fonts.load('400 20px DIAFont'),document.fonts.load('700 20px DIAFont'),
+      document.fonts.load('400 20px DIANum'),document.fonts.load('700 20px DIANum')
+    ]);
+    await document.fonts.ready;
+  }catch(_){
+    try{await document.fonts?.ready;}catch(__){}
+  }
   const clean=t=>String(t??'').replace(/\s+/g,' ').trim();
   const rows=[...el.querySelectorAll('.clean-invoice-table tbody tr')].map(tr=>[...tr.children].map(td=>clean(td.textContent))).filter(r=>r.length>=7);
   const summary=[...el.querySelectorAll('.invoice-summary-box>div')].map(d=>({label:clean(d.querySelector('span')?.textContent),value:clean(d.querySelector('strong')?.textContent),grand:d.classList.contains('grand'),balance:d.classList.contains('balance-row')}));
@@ -126,11 +152,12 @@ export async function invoiceToImage(el,name='invoice.jpg'){
   const ctx=canvas.getContext('2d');if(!ctx)throw new Error('مرورگر امکان ساخت تصویر فاکتور را ندارد.');
   const C={black:'#151918',text:'#252b29',muted:'#69726f',line:'#b9c0bd',soft:'#f6f7f6',accent:'#087f70',accentSoft:'#e9f4f1',white:'#ffffff'};
   ctx.fillStyle=C.white;ctx.fillRect(0,0,W,H);ctx.direction='rtl';ctx.textBaseline='middle';
+  const containsNumber=t=>/[0-9۰-۹٠-٩]/.test(String(t??''));
   const font=(size,bold=false,numeric=false)=>{ctx.font=`${bold?'700':'400'} ${size}px ${numeric?'DIANum':'DIAFont'},Tahoma,Arial,sans-serif`;};
-  const wrap=(text,max,size=20,bold=false,numeric=false)=>{font(size,bold,numeric);const words=clean(text).split(' ');const out=[];let line='';for(const word of words){const test=line?`${line} ${word}`:word;if(ctx.measureText(test).width<=max)line=test;else{if(line)out.push(line);line=word;}}if(line)out.push(line);return out.length?out:[''];};
-  const textR=(text,x,y,size,bold=false,fill=C.text,max=CW,numeric=false)=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='right';const lines=wrap(text,max,size,bold,numeric);lines.forEach((ln,i)=>ctx.fillText(ln,x,y+i*29));return lines.length*29;};
-  const textC=(text,x,y,size,bold=false,fill=C.text,numeric=false)=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='center';ctx.fillText(clean(text),x,y);};
-  const textL=(text,x,y,size,bold=false,fill=C.text,numeric=false)=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='left';ctx.fillText(clean(text),x,y);};
+  const wrap=(text,max,size=20,bold=false,numeric=containsNumber(text))=>{font(size,bold,numeric);const words=clean(text).split(' ');const out=[];let line='';for(const word of words){const test=line?`${line} ${word}`:word;if(ctx.measureText(test).width<=max)line=test;else{if(line)out.push(line);line=word;}}if(line)out.push(line);return out.length?out:[''];};
+  const textR=(text,x,y,size,bold=false,fill=C.text,max=CW,numeric=containsNumber(text))=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='right';const lines=wrap(text,max,size,bold,numeric);lines.forEach((ln,i)=>ctx.fillText(ln,x,y+i*29));return lines.length*29;};
+  const textC=(text,x,y,size,bold=false,fill=C.text,numeric=containsNumber(text))=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='center';ctx.fillText(clean(text),x,y);};
+  const textL=(text,x,y,size,bold=false,fill=C.text,numeric=containsNumber(text))=>{font(size,bold,numeric);ctx.fillStyle=fill;ctx.textAlign='left';ctx.fillText(clean(text),x,y);};
   const line=(x1,y1,x2,y2,w=1,stroke=C.line)=>{ctx.strokeStyle=stroke;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
   const box=(x,y,w,h,fill=C.white,stroke=C.line,lw=1)=>{ctx.fillStyle=fill;ctx.fillRect(x,y,w,h);ctx.strokeStyle=stroke;ctx.lineWidth=lw;ctx.strokeRect(x,y,w,h);};
   const logo=async()=>{if(!logoSrc)return;try{const img=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=logoSrc;});const size=64;ctx.drawImage(img,W/2-size/2,18,size,size);}catch(_) {}};
