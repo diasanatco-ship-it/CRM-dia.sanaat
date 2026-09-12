@@ -160,7 +160,7 @@ const FIELD_LABELS = {
   customerId: 'مشتری', invoiceNumber: 'شماره فاکتور', date: 'تاریخ', items: 'اقلام فاکتور', discount: 'تخفیف',
   tax: 'مالیات', paidAmount: 'مبلغ پرداختی', type: 'نوع', itemId: 'کالا/خدمت', quantity: 'تعداد', unitPrice: 'قیمت واحد',
   amount: 'مبلغ', businessName: 'نام کسب‌وکار', ownerName: 'نام صاحب کسب‌وکار', invoicePrefix: 'پیشوند فاکتور',
-  invoiceStartNumber: 'شماره شروع فاکتور', currency: 'واحد پول', taxRate: 'درصد مالیات', invoiceNotes: 'توضیحات فاکتور'
+  invoiceStartNumber: 'شماره شروع فاکتور', taxRate: 'درصد مالیات', invoiceNotes: 'توضیحات فاکتور'
 };
 function labelFa(field) { return FIELD_LABELS[field] || field; }
 
@@ -238,8 +238,8 @@ export function validateProject(data = {}) {
 
 export function validateInvoiceItem(data = {}) {
   const errors = [];
-  if (data.type !== 'product' && data.type !== 'service') errors.push({ field: 'type', message: 'نوع قلم فاکتور باید کالا یا خدمت باشد' });
-  if (!isValidId(data.itemId)) errors.push({ field: 'itemId', message: 'کالا/خدمت انتخاب‌شده معتبر نیست' });
+  if (data.type !== 'product' && data.type !== 'service' && data.type !== 'manual') errors.push({ field: 'type', message: 'نوع قلم فاکتور معتبر نیست' });
+  if (data.type !== 'manual' && !isValidId(data.itemId)) errors.push({ field: 'itemId', message: 'کالا/خدمت انتخاب‌شده معتبر نیست' });
   const nameRes = validateString(data.name, 'name', { required: true, maxLength: 200 });
   if (!nameRes.valid) errors.push(...nameRes.errors);
   const qtyRes = validateAmount(data.quantity, 'quantity', { allowZero: false });
@@ -252,7 +252,12 @@ export function validateInvoiceItem(data = {}) {
     const qty = Number(normalizeAmountInput(data.quantity)) || 0;
     const price = Number(normalizeAmountInput(data.unitPrice)) || 0;
     const subtotal = qty * price;
-    if (Number(normalizeAmountInput(data.discount)) > subtotal) errors.push({ field: 'discount', message: 'تخفیف نمی‌تواند بیشتر از مبلغ ردیف باشد' });
+    const rawDiscount = Number(normalizeAmountInput(data.discountInput ?? data.discount)) || 0;
+    if (data.discountType === 'percent') {
+      if (rawDiscount > 100) errors.push({ field: 'discount', message: 'درصد تخفیف نمی‌تواند بیشتر از ۱۰۰٪ باشد' });
+    } else if (rawDiscount > subtotal) {
+      errors.push({ field: 'discount', message: 'تخفیف نمی‌تواند بیشتر از مبلغ ردیف باشد' });
+    }
   }
   return { valid: errors.length === 0, errors };
 }
@@ -321,7 +326,6 @@ export function validateSettings(data = {}) {
     if (!r.valid) errors.push(...r.errors);
   }
   if (data.taxEnabled !== undefined && typeof data.taxEnabled !== 'boolean') errors.push({ field: 'taxEnabled', message: 'وضعیت فعال‌بودن مالیات نامعتبر است' });
-  const currRes = validateString(data.currency, 'currency', { maxLength: 20 }); if (!currRes.valid) errors.push(...currRes.errors);
   const notesRes = validateString(data.invoiceNotes ?? data.invoiceNote, 'invoiceNotes', { maxLength: 500 }); if (!notesRes.valid) errors.push(...notesRes.errors);
   return { valid: errors.length === 0, errors };
 }

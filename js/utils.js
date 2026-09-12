@@ -1,4 +1,5 @@
-export const money=(n,unit='تومان')=>new Intl.NumberFormat('fa-IR').format(Math.round(Number(n)||0))+(unit?' '+unit:'');
+export const CURRENCY='ریال';
+export const money=(n,unit=CURRENCY)=>new Intl.NumberFormat('fa-IR').format(Math.round(Number(n)||0))+(unit?' '+unit:'');
 export const num=n=>new Intl.NumberFormat('fa-IR',{maximumFractionDigits:2}).format(Number(n)||0);
 export const formatAmountInput=value=>{
   if(value===null||value===undefined||value==='') return '';
@@ -30,7 +31,41 @@ export const dateTimeFa=d=>{if(!d)return '—';const dt=new Date(d);return Numbe
 export const uid=()=>Date.now()+Math.floor(Math.random()*100000);
 export const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 export const icon=(name,label='',cls='icon')=>`<img class="${cls}" src="./assets/icons/${name}.svg" alt="${esc(label)}" aria-hidden="${label?'false':'true'}">`;
-export const todayISO=()=>new Date().toISOString().slice(0,10);
+export const todayISO=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+
+// Gregorian/Jalali conversion kept local and dependency-free for offline/PWA use.
+export function gregorianToJalali(gy,gm,gd){
+  const gdm=[0,31,59,90,120,151,181,212,243,273,304,334];
+  let gy2=gy+(gm>2?1:0);
+  let days=355666+365*gy+Math.floor((gy2+3)/4)-Math.floor((gy2+99)/100)+Math.floor((gy2+399)/400)+gd+gdm[gm-1];
+  let jy=-1595+33*Math.floor(days/12053); days%=12053;
+  jy+=4*Math.floor(days/1461); days%=1461;
+  if(days>365){jy+=Math.floor((days-1)/365);days=(days-1)%365;}
+  const jm=days<186?1+Math.floor(days/31):7+Math.floor((days-186)/30);
+  const jd=1+(days<186?days%31:(days-186)%30);
+  return [jy,jm,jd];
+}
+export function jalaliToGregorian(jy,jm,jd){
+  jy=Number(jy);jm=Number(jm);jd=Number(jd);
+  let jy2=jy+1595;
+  let days=-355668+365*jy2+Math.floor(jy2/33)*8+Math.floor((jy2%33+3)/4)+jd+(jm<7?(jm-1)*31:(jm-7)*30+186);
+  let gy=400*Math.floor(days/146097); days%=146097;
+  if(days>36524){gy+=100*Math.floor(--days/36524);days%=36524;if(days>=365)days++;}
+  gy+=4*Math.floor(days/1461);days%=1461;
+  if(days>365){gy+=Math.floor((days-1)/365);days=(days-1)%365;}
+  const gd=days+1;
+  const leap=gy%4===0&&(gy%100!==0||gy%400===0);
+  const gdm=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31];
+  let gm=1; let rem=gd; for(let i=0;i<12;i++){if(rem>gdm[i]){rem-=gdm[i];gm++;}else break;}
+  return [gy,gm,rem];
+}
+export const jalaliFromISO=iso=>{if(!iso)return null;const m=String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m)return null;const [gy,gm,gd]=m.slice(1).map(Number);return gregorianToJalali(gy,gm,gd);};
+export const isoFromJalali=(jy,jm,jd)=>{const [gy,gm,gd]=jalaliToGregorian(jy,jm,jd);return `${gy}-${String(gm).padStart(2,'0')}-${String(gd).padStart(2,'0')}`;};
+export const jalaliDateText=iso=>{const j=jalaliFromISO(iso);return j?`${new Intl.NumberFormat('fa-IR').format(j[0])}/${new Intl.NumberFormat('fa-IR').format(j[1]).padStart(2,'۰')}/${new Intl.NumberFormat('fa-IR').format(j[2]).padStart(2,'۰')}`:'—';};
+export const jalaliYearMonthDay=iso=>jalaliFromISO(iso)||gregorianToJalali(...todayISO().split('-').map(Number));
+export const jalaliMonthNames=['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
+export const jalaliIsLeap=jy=>{const [gy,gm,gd]=jalaliToGregorian(jy,12,30);const back=gregorianToJalali(gy,gm,gd);return back[0]===Number(jy)&&back[1]===12&&back[2]===30;};
+
 export function toast(msg,kind=''){const r=document.getElementById('toast-root');if(!r)return;r.innerHTML=`<div class="toast ${kind?'toast-'+kind:''}" role="status">${esc(msg)}</div>`;clearTimeout(toast._t);toast._t=setTimeout(()=>r.innerHTML='',2600);}
 export async function downloadBlob(blob,name){
   if(!blob) throw new Error('فایل خروجی ساخته نشد.');
@@ -56,93 +91,126 @@ export async function downloadBlob(blob,name){
 }
 export const downloadJSON=(data,name)=>downloadBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),name);
 export function printWithClass(cls){document.body.classList.add(cls);const cleanup=()=>{document.body.classList.remove(cls);window.removeEventListener('afterprint',cleanup)};window.addEventListener('afterprint',cleanup);setTimeout(()=>window.print(),40);}
-export async function invoiceToImage(el,name='invoice.png'){
+export async function invoiceToImage(el,name='invoice.jpg'){
   if(!el) throw new Error('محتوای فاکتور پیدا نشد.');
-  await document.fonts?.ready;
-  const W=1600, PAD=70, CONTENT=W-PAD*2;
-  const rows=[...el.querySelectorAll('.clean-invoice-table tbody tr')].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
-  const info=[...el.querySelectorAll('.invoice-info-card')].map(card=>({label:card.querySelector('span')?.textContent?.trim()||'',value:card.querySelector('strong')?.textContent?.trim()||'',small:card.querySelector('small')?.textContent?.trim()||''}));
-  const summary=[...el.querySelectorAll('.invoice-summary-box>div')].map(d=>({label:d.querySelector('span')?.textContent?.trim()||'',value:d.querySelector('strong')?.textContent?.trim()||'',grand:d.classList.contains('grand'),balance:d.classList.contains('balance-row')}));
-  const business=el.querySelector('.invoice-business-name')?.textContent?.trim()||'DIA Business';
-  const businessSub=el.querySelector('.invoice-business-sub')?.textContent?.trim()||'';
-  const docLabel=el.querySelector('.invoice-doc-label')?.textContent?.trim()||'فاکتور فروش';
-  const docNumber=el.querySelector('.invoice-doc-number')?.textContent?.trim()||'';
-  const words=el.querySelector('.invoice-words-block>strong')?.textContent?.trim()||'';
-  const notes=el.querySelector('.invoice-notes-block p')?.textContent?.trim()||'';
-  const footer=el.querySelector('.invoice-footer-note')?.textContent?.trim()||'';
+  try{await document.fonts?.load('700 32px DIAFont');await document.fonts?.load('400 20px DIAFont');await document.fonts?.ready;}catch(_){}
+  const clean=t=>String(t??'').replace(/\s+/g,' ').trim();
+  const rows=[...el.querySelectorAll('.clean-invoice-table tbody tr')].map(tr=>[...tr.children].map(td=>clean(td.textContent))).filter(r=>r.length>=7);
+  const summary=[...el.querySelectorAll('.invoice-summary-box>div')].map(d=>({label:clean(d.querySelector('span')?.textContent),value:clean(d.querySelector('strong')?.textContent),grand:d.classList.contains('grand'),balance:d.classList.contains('balance-row')}));
+  const business=clean(el.querySelector('.invoice-business-name')?.textContent)||'DIA Sanat';
+  const businessSub=clean(el.querySelector('.invoice-business-sub')?.textContent)||'تأسیسات الکتریکی و نورپردازی';
+  const docLabel=clean(el.querySelector('.invoice-doc-label')?.textContent)||'فاکتور فروش';
+  const docNumber=clean(el.querySelector('.invoice-doc-number')?.textContent)||'';
+  const seller=[...el.querySelectorAll('.invoice-party-card')][0];
+  const buyer=[...el.querySelectorAll('.invoice-party-card')][1];
+  const sellerName=clean(seller?.querySelector('strong')?.textContent)||business;
+  const sellerLines=[...seller?.querySelectorAll('span')||[]].map(x=>clean(x.textContent)).filter(Boolean);
+  const buyerName=clean(buyer?.querySelector('strong')?.textContent)||'مشتری آزاد';
+  const buyerLines=[...buyer?.querySelectorAll('span')||[]].map(x=>clean(x.textContent)).filter(Boolean);
+  const meta=[...el.querySelectorAll('.invoice-meta-card>div')].map(d=>({label:clean(d.querySelector('span')?.textContent),value:clean(d.querySelector('strong')?.textContent)}));
+  const project=el.querySelector('.invoice-project-card');
+  const projectParts=project?[...project.children].map(x=>({label:clean(x.querySelector('span')?.textContent),value:clean(x.querySelector('strong')?.textContent)})).filter(x=>x.value):[];
+  const words=clean(el.querySelector('.invoice-words-block>strong')?.textContent);
+  const notes=clean(el.querySelector('.invoice-notes-block p')?.textContent);
+  const footer=clean(el.querySelector('.invoice-footer-note')?.textContent);
   const logoSrc=el.querySelector('.invoice-logo')?.getAttribute('src');
-  const lineHeight=34;
-  const wrap=(ctx,text,maxWidth)=>{const out=[];let line='';for(const word of String(text||'').split(/\s+/)){const test=line?line+' '+word:word;if(ctx.measureText(test).width<=maxWidth)line=test;else{if(line)out.push(line);line=word;}}if(line)out.push(line);return out.length?out:[''];};
-  const canvas=document.createElement('canvas');
-  const ctx=canvas.getContext('2d'); if(!ctx)throw new Error('مرورگر امکان ساخت تصویر را ندارد.');
-  let H=560 + Math.max(1,rows.length)*68 + 420 + Math.ceil(words.length/75)*28 + Math.ceil(notes.length/80)*28;
-  H=Math.max(1900,Math.min(3600,H)); canvas.width=W*2; canvas.height=H*2; ctx.scale(2,2);
-  const C={text:'#263330',muted:'#6f7c77',border:'#d7e1dc',soft:'#f3f6f3',primary:'#087f70',primarySoft:'#e7f3f0',white:'#ffffff'};
+  const W=1240, PAD=58, CW=W-PAD*2;
+  const rowH=62, headH=58;
+  const estimatedRows=Math.max(1,rows.length);
+  const estimatedWordLines=Math.max(1,Math.ceil(words.length/48));
+  const estimatedNoteLines=notes?Math.max(1,Math.ceil(notes.length/55)):0;
+  let H=980 + estimatedRows*rowH + (projectParts.length?115:0) + Math.min(340,80+estimatedWordLines*28+estimatedNoteLines*25) + (footer?68:0) + 110;
+  H=Math.max(1500,Math.min(3200,H));
+  const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
+  const ctx=canvas.getContext('2d');if(!ctx)throw new Error('مرورگر امکان ساخت تصویر فاکتور را ندارد.');
+  const C={black:'#151918',text:'#252b29',muted:'#69726f',line:'#b9c0bd',soft:'#f6f7f6',accent:'#087f70',accentSoft:'#e9f4f1',white:'#ffffff'};
   ctx.fillStyle=C.white;ctx.fillRect(0,0,W,H);ctx.direction='rtl';ctx.textBaseline='middle';
-  const rr=(x,y,w,h,r,fill,stroke)=>{ctx.beginPath();ctx.roundRect(x,y,w,h,r);if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke()}};
-  const font=(size,bold=false)=>ctx.font=`${bold?'700':'400'} ${size}px DIAFont,Tahoma,Arial,sans-serif`;
-  const textR=(text,x,y,size,bold=false,max=Infinity)=>{font(size,bold);ctx.fillStyle=C.text;const ls=wrap(ctx,text,max);ls.forEach((line,i)=>ctx.fillText(line,x,y+i*lineHeight));return ls.length*lineHeight;};
-  // Header
-  let y=74;
-  if(logoSrc){try{const img=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=logoSrc;});rr(PAD,y-24,92,92,18,C.primarySoft);ctx.drawImage(img,PAD+10,y-14,72,72);}catch(_){} }
-  textR(business,PAD+112,y+2,34,true,700);textR(businessSub,PAD+112,y+43,17,false,700);
-  font(40,true);ctx.fillStyle=C.text;ctx.fillText(docLabel,W-PAD, y+4);
-  font(18,false);ctx.fillStyle=C.muted;ctx.fillText(docNumber,W-PAD,y+52);
-  y+=112;ctx.fillStyle=C.primary;ctx.fillRect(PAD,y,CONTENT,4);y+=34;
-  // Info cards
-  const cols=info.length>2?2:1, gap=14, iw=(CONTENT-gap*(cols-1))/cols, ih=82;
-  info.forEach((it,i)=>{const col=i%cols,row=Math.floor(i/cols),x=W-PAD-iw-col*(iw+gap);const yy=y+row*(ih+gap);rr(x,yy,iw,ih,14,C.soft,C.border);textR(it.label,x+iw-18,yy+25,15,false,iw-36);textR(it.value,x+iw-18,yy+52,19,true,iw-36);if(it.small)textR(it.small,x+18,yy+52,13,false,iw-36);});
-  y+=Math.ceil(info.length/cols)*(ih+gap)+28;
-  font(20,true);ctx.fillStyle=C.text;ctx.fillText('جزئیات فاکتور',W-PAD,y);y+=28;
-  // Table
-  const tw=[72,430,120,120,255,220,255], headers=['ردیف','شرح کالا / خدمت','تعداد','واحد','قیمت واحد','تخفیف','مبلغ'];
-  const tableX=PAD, tableW=tw.reduce((a,b)=>a+b,0), th=52, rh=64;
-  rr(tableX,y,tableW,th+Math.max(1,rows.length)*rh,12,C.white,C.border);ctx.save();ctx.beginPath();ctx.roundRect(tableX,y,tableW,th+Math.max(1,rows.length)*rh,12);ctx.clip();ctx.fillStyle=C.soft;ctx.fillRect(tableX,y,tableW,th);ctx.restore();
-  let x=tableX; for(let i=0;i<tw.length;i++){const w=tw[i], center=x+w/2; font(15,true);ctx.fillStyle=C.text;ctx.textAlign='center';ctx.fillText(headers[i],center,y+th/2);ctx.strokeStyle=C.border;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+th+Math.max(1,rows.length)*rh);ctx.stroke();x+=w;}ctx.textAlign='right';
-  rows.forEach((r,ri)=>{const yy=y+th+ri*rh;ctx.strokeStyle=C.border;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(tableX,yy);ctx.lineTo(tableX+tableW,yy);ctx.stroke();let xx=tableX;r.forEach((val,ci)=>{const w=tw[ci], align=(ci===1?'right':'center');ctx.textAlign=align;font(14,ci===6);ctx.fillStyle=C.text;const tx=ci===1?xx+w-12:xx+w/2;const ls=wrap(ctx,val,ci===1?w-24:w-12);ls.slice(0,2).forEach((ln,j)=>ctx.fillText(ln,tx,yy+rh/2+(j-(ls.length>1?.5:0))*22));xx+=w;});});
-  y+=th+Math.max(1,rows.length)*rh+22;
-  // Bottom blocks
-  const leftW=CONTENT-390-gap, rightW=390, bx=PAD, rx=W-PAD-rightW, bh=230;
-  rr(bx,y,leftW,bh,14,C.soft,C.border);textR('مبلغ به حروف',bx+leftW-20,y+30,14,false,leftW-40);textR(words,bx+leftW-20,y+70,19,true,leftW-40);
-  if(notes){font(14,false);ctx.fillStyle=C.muted;ctx.fillText('توضیحات',bx+leftW-20,y+142);textR(notes,bx+leftW-20,y+178,15,false,leftW-40);}
-  rr(rx,y,rightW,bh,14,C.white,C.border);summary.forEach((it,i)=>{const yy=y+16+i*38;if(it.grand){ctx.fillStyle=C.primarySoft;ctx.fillRect(rx,yy-18,rightW,48);}font(it.grand?17:14,it.grand);ctx.fillStyle=it.grand?C.primary:C.text;ctx.textAlign='right';ctx.fillText(it.label,rx+rightW-16,yy);ctx.textAlign='left';ctx.fillText(it.value,rx+16,yy);});
-  y+=bh+24;
-  rr(PAD,y,CONTENT,48,10,C.soft);font(14,false);ctx.fillStyle=C.muted;ctx.textAlign='center';ctx.fillText(footer,W/2,y+24);y+=82;
-  // signatures
-  const sw=(CONTENT-40)/2;[['امضای خریدار',PAD],['مهر و امضای فروشنده',PAD+sw+40]].forEach(([label,x0])=>{font(14,true);ctx.fillStyle=C.text;ctx.textAlign='center';ctx.fillText(label,x0+sw/2,y);ctx.strokeStyle='#b9c4bf';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x0+30,y+54);ctx.lineTo(x0+sw-30,y+54);ctx.stroke();});
-  canvas.height=Math.min(canvas.height,Math.ceil((y+100)*2));
-  const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('ساخت PNG ناموفق بود.')),'image/png',1));
-  return downloadBlob(blob,name);
+  const font=(size,bold=false)=>{ctx.font=`${bold?'700':'400'} ${size}px DIAFont,Tahoma,Arial,sans-serif`;};
+  const wrap=(text,max,size=20,bold=false)=>{font(size,bold);const words=clean(text).split(' ');const out=[];let line='';for(const word of words){const test=line?`${line} ${word}`:word;if(ctx.measureText(test).width<=max)line=test;else{if(line)out.push(line);line=word;}}if(line)out.push(line);return out.length?out:[''];};
+  const textR=(text,x,y,size,bold=false,fill=C.text,max=CW)=>{font(size,bold);ctx.fillStyle=fill;ctx.textAlign='right';const lines=wrap(text,max,size,bold);lines.forEach((ln,i)=>ctx.fillText(ln,x,y+i*29));return lines.length*29;};
+  const textC=(text,x,y,size,bold=false,fill=C.text)=>{font(size,bold);ctx.fillStyle=fill;ctx.textAlign='center';ctx.fillText(clean(text),x,y);};
+  const textL=(text,x,y,size,bold=false,fill=C.text)=>{font(size,bold);ctx.fillStyle=fill;ctx.textAlign='left';ctx.fillText(clean(text),x,y);};
+  const line=(x1,y1,x2,y2,w=1,stroke=C.line)=>{ctx.strokeStyle=stroke;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
+  const box=(x,y,w,h,fill=C.white,stroke=C.line,lw=1)=>{ctx.fillStyle=fill;ctx.fillRect(x,y,w,h);ctx.strokeStyle=stroke;ctx.lineWidth=lw;ctx.strokeRect(x,y,w,h);};
+  const logo=async()=>{if(!logoSrc)return;try{const img=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=logoSrc;});const size=82;ctx.drawImage(img,W-PAD-size,48,size,size);}catch(_) {}};
+  await logo();
+  // Header: close to a traditional Iranian A4 invoice — logo right, title centered, page marker left.
+  textR(business,W-PAD-108,62,26,true,C.black);textR(businessSub,W-PAD-108,98,14,false,C.muted,700);
+  textC(docLabel,W/2,69,34,true,C.black);textC(docNumber,W/2,111,16,false,C.muted);
+  textL('نسخه مشتری',PAD,63,17,true,C.black);textL('سیستم حسابداری DIA',PAD,96,13,true,C.muted);
+  line(PAD,148,W-PAD,148,1.4,C.black);
+  let y=170;
+  // Seller / buyer / invoice metadata block.
+  const gap=14, metaW=230, partyW=(CW-metaW-gap)/2;
+  const bx=PAD, sx=PAD+partyW+gap, mx=W-PAD-metaW;
+  box(bx,y,partyW,132,C.white,C.line);box(sx,y,partyW,132,C.white,C.line);box(mx,y,metaW,132,C.white,C.line);
+  textR('فروشنده',bx+partyW-16,y+22,14,true,C.muted);textR(sellerName,bx+partyW-16,y+50,18,true,C.black);sellerLines.slice(0,2).forEach((v,i)=>textR(v,bx+partyW-16,y+79+i*24,13,false,C.text,partyW-32));
+  textR('خریدار / طرف حساب',sx+partyW-16,y+22,14,true,C.muted);textR(buyerName,sx+partyW-16,y+50,18,true,C.black);buyerLines.slice(0,2).forEach((v,i)=>textR(v,sx+partyW-16,y+79+i*24,13,false,C.text,partyW-32));
+  meta.slice(0,2).forEach((it,i)=>{textR(it.label,mx+metaW-16,y+28+i*50,13,false,C.muted);textR(it.value,mx+metaW-16,y+54+i*50,17,true,C.black,metaW-32);});
+  y+=150;
+  if(projectParts.length){box(PAD,y,CW,92,C.soft,C.line);projectParts.slice(0,3).forEach((it,i)=>{const colW=CW/Math.min(3,projectParts.length);const xx=W-PAD-i*colW-14;textR(it.label,xx,y+22,12,false,C.muted,colW-28);textR(it.value,xx,y+53,15,true,C.black,colW-28);});y+=108;}
+  textR('شرح کالا و خدمات',W-PAD,y+18,17,true,C.black);y+=45;
+  // Table.
+  const widths=[52,150,130,170,82,82,458]; // physical LTR: row, total, discount, unit price, unit, qty, description (description ends up on the RTL right)
+  const tableX=PAD, tableW=widths.reduce((a,b)=>a+b,0), tableH=headH+Math.max(1,rows.length)*rowH;
+  box(tableX,y,tableW,tableH,C.white,C.black,1.2);
+  ctx.fillStyle=C.soft;ctx.fillRect(tableX,y,tableW,headH);
+  const headers=['ردیف','مبلغ','تخفیف','قیمت واحد','واحد','تعداد','شرح کالا / خدمت'];
+  let x=tableX;
+  headers.forEach((h,i)=>{const w=widths[i];textC(h,x+w/2,y+headH/2,13,true,C.black);if(i>0)line(x,y,x,y+tableH,1,C.line);x+=w;});
+  rows.forEach((r,ri)=>{const yy=y+headH+ri*rowH;line(tableX,yy,tableX+tableW,yy,1,C.line);const cells=[r[0],r[6],r[5],r[4],r[3],r[2],r[1]];let xx=tableX;cells.forEach((v,ci)=>{const w=widths[ci];const max=ci===6?w-18:w-10;const lines=wrap(v,max,13,ci===1||ci===6);font(13,ci===1||ci===6);ctx.fillStyle=C.text;ctx.textAlign=ci===6?'right':'center';const tx=ci===6?xx+w-9:xx+w/2;lines.slice(0,2).forEach((ln,j)=>ctx.fillText(ln,tx,yy+rowH/2+(j-(lines.length>1?.5:0))*18));xx+=w;});});
+  y+=tableH+22;
+  // Totals and amount in words, matching the screenshot's two-column lower section.
+  const summaryW=360, wordsW=CW-summaryW-gap, sy=y;
+  const wordLines=Math.max(1,wrap(words,wordsW-32,16,true).length);
+  const noteLines=notes?Math.max(1,wrap(notes,wordsW-32,13,false).length):0;
+  const sh=Math.max(190,Math.min(340,72+wordLines*28+noteLines*25));
+  box(PAD,sy,wordsW,sh,C.white,C.line);box(W-PAD-summaryW,sy,summaryW,sh,C.white,C.line);
+  textR('مبلغ به حروف',PAD+wordsW-16,sy+25,13,true,C.muted);let wy=sy+61;for(const ln of wrap(words,wordsW-32).slice(0,5)){textR(ln,PAD+wordsW-16,wy,16,true,C.black,wordsW-32);wy+=28;}
+  if(notes){textR('توضیحات و شرایط',PAD+wordsW-16,sy+150,13,true,C.muted);let ny=sy+183;for(const ln of wrap(notes,wordsW-32).slice(0,3)){textR(ln,PAD+wordsW-16,ny,13,false,C.text,wordsW-32);ny+=24;}}
+  let yy=sy+15;summary.forEach(it=>{const h=it.grand?49:34;if(it.grand){ctx.fillStyle=C.accentSoft;ctx.fillRect(W-PAD-summaryW,yy,summaryW,h);}textR(it.label,W-PAD-16,yy+h/2,13,it.grand,C.muted);textL(it.value,W-PAD-summaryW+16,yy+h/2,14,it.grand,it.grand?C.accent:C.black);yy+=h;});
+  y+=sh+24;
+  if(footer){box(PAD,y,CW,46,C.soft,C.soft);textC(footer,W/2,y+23,12,false,C.muted);y+=68;}
+  // Signatures.
+  const half=(CW-80)/2;textC('امضای خریدار',PAD+half/2,y+20,14,true,C.black);textC('مهر و امضای فروشنده',PAD+half+80+half/2,y+20,14,true,C.black);line(PAD+30,y+68,PAD+half-30,y+68,1,C.line);line(PAD+half+110,y+68,W-PAD-30,y+68,1,C.line);
+  // PNG keeps Persian text and thin invoice lines crisp and is reliably shareable on iOS.
+  const outName=/\.(png|jpeg|jpg)$/i.test(name)?name.replace(/\.(png|jpeg|jpg)$/i,'.png'):name.replace(/\.[^.]+$/,'')+'.png';
+  const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('ساخت تصویر فاکتور ناموفق بود.')),'image/png'));
+  return downloadBlob(blob,outName);
 }
 
 const Y=['','یک','دو','سه','چهار','پنج','شش','هفت','هشت','نه'],D19=['ده','یازده','دوازده','سیزده','چهارده','پانزده','شانزده','هفده','هجده','نوزده'],D=['','','بیست','سی','چهل','پنجاه','شصت','هفتاد','هشتاد','نود'],H=['','صد','دویست','سیصد','چهارصد','پانصد','ششصد','هفتصد','هشتصد','نهصد'],S=['','هزار','میلیون','میلیارد','هزار میلیارد','میلیون میلیارد'];
 function three(n){const a=[],h=Math.floor(n/100),d=Math.floor(n%100/10),y=n%10;if(h)a.push(H[h]);if(d===1)a.push(D19[y]);else{if(d)a.push(D[d]);if(y)a.push(Y[y]);}return a.join(' و ');}
 export function numberToWordsFa(input){let n=Math.round(Math.abs(Number(input)||0));if(n===0)return 'صفر';const g=[];while(n){g.unshift(n%1000);n=Math.floor(n/1000)}return g.map((x,i)=>x?three(x)+(g.length-1-i?` ${S[g.length-1-i]}`:''):'').filter(Boolean).join(' و ');}
-export const amountToWordsFa=(n,unit='تومان')=>numberToWordsFa(n)+' '+unit;
+export const amountToWordsFa=(n)=>numberToWordsFa(n)+' ریال';
 export const INVOICE_STATUS_LABELS={draft:'پیش‌نویس',issued:'صادر شده',partially_paid:'پرداخت جزئی',paid:'پرداخت شده',cancelled:'لغو شده'};
 export const INVOICE_STATUS_BADGE={draft:'muted',issued:'info',partially_paid:'warn',paid:'paid',cancelled:'danger'};
 export const PROJECT_STATUS_LABELS={planned:'در انتظار',active:'در حال اجرا',completed:'تمام شده',cancelled:'لغو شده'};
 export const TRANSACTION_TYPE_LABELS={income:'درآمد',expense:'هزینه',customer_payment:'دریافت از مشتری',supplier_payment:'پرداخت به تأمین‌کننده',other_expense:'پرداخت سایر هزینه‌ها'};
 export const isIncomeType=t=>t==='income'||t==='customer_payment';
 export const isExpenseType=t=>t==='expense'||t==='supplier_payment'||t==='other_expense';
+export function dateToTimestamp(value){
+  if(value===null||value===undefined||value==='') return NaN;
+  if(typeof value==='number') return value;
+  const s=String(value);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00`).getTime();
+  return new Date(s).getTime();
+}
 export function buildCustomerLedger(invoices=[],transactions=[],customerId){
   const cid=String(customerId);
   const its=invoices.filter(i=>String(i.customerId)===cid&&i.status!=='cancelled');
   const pays=transactions.filter(t=>String(t.customerId)===cid&&t.type==='customer_payment');
   const ledger=[];
   its.forEach(i=>{
-    ledger.push({date:i.date?new Date(i.date).getTime():i.createdAt,desc:`فاکتور ${i.number}`,debit:Number(i.total)||0,credit:0,ref:i.id,kind:'invoice'});
+    ledger.push({date:dateToTimestamp(i.date)||i.createdAt,desc:`فاکتور ${i.number}`,debit:Number(i.total)||0,credit:0,ref:i.id,kind:'invoice'});
     const linked=pays.filter(t=>String(t.invoiceId)===String(i.id));
-    const linkedPaid=linked.reduce((s,t)=>s+(Number(t.amount)||0),0);
-    // New payments are stored as transactions and are the source of truth.
-    // Legacy invoices without linked payment transactions keep their old paidAmount as a fallback.
     if(linked.length){
-      linked.forEach(t=>ledger.push({date:t.createdAt||i.updatedAt||i.createdAt,desc:t.description||`دریافت فاکتور ${i.number}`,debit:0,credit:Number(t.amount)||0,ref:t.id,invoiceId:i.id,kind:'payment'}));
+      linked.forEach(t=>ledger.push({date:dateToTimestamp(t.date)||t.createdAt||i.updatedAt||i.createdAt,desc:t.description||`دریافت فاکتور ${i.number}`,debit:0,credit:Number(t.amount)||0,ref:t.id,invoiceId:i.id,kind:'payment'}));
     }else if(Number(i.paidAmount)>0){
-      ledger.push({date:i.updatedAt||i.createdAt,desc:`دریافت فاکتور ${i.number}`,debit:0,credit:Number(i.paidAmount)||0,ref:i.id,invoiceId:i.id,kind:'payment',legacy:true});
+      ledger.push({date:i.updatedAt||dateToTimestamp(i.date)||i.createdAt,desc:`دریافت فاکتور ${i.number}`,debit:0,credit:Number(i.paidAmount)||0,ref:i.id,invoiceId:i.id,kind:'payment',legacy:true});
     }
   });
-  pays.filter(t=>!t.invoiceId).forEach(t=>ledger.push({date:t.createdAt,desc:t.description||'دریافت وجه',debit:0,credit:Number(t.amount)||0,ref:t.id,kind:'payment'}));
+  pays.filter(t=>!t.invoiceId).forEach(t=>ledger.push({date:dateToTimestamp(t.date)||t.createdAt,desc:t.description||'دریافت وجه',debit:0,credit:Number(t.amount)||0,ref:t.id,kind:'payment'}));
   ledger.sort((a,b)=>a.date-b.date||String(a.kind).localeCompare(String(b.kind)));
   let running=0; ledger.forEach(r=>{running+=r.debit-r.credit;r.balance=running;});
   const total=its.reduce((s,i)=>s+(Number(i.total)||0),0);
