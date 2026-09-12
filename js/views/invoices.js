@@ -61,7 +61,7 @@ export async function renderInvoices(App, opts = {}) {
     list.innerHTML = rs.map(invoiceCard).join('') || emptyState('فاکتوری ثبت نشده', 'برای شروع یک فاکتور فروش ایجاد کنید.', 'فاکتور جدید', 'add-empty');
     list.querySelectorAll('[data-open-invoice]').forEach(b => b.onclick = () => navigate(`#/invoices/${b.dataset.openInvoice}`));
     bindActionMenus(list, {
-      edit: id => { const x = rows.find(r => String(r.id) === String(id)); if (x) form(null, x); },
+      edit: id => { const x = rows.find(r => String(r.id) === String(id)); if (x) { closeModal(); navigate(`#/invoices?edit=${encodeURIComponent(x.id)}`); } },
       delete: async id => { const x=rows.find(r=>String(r.id)===String(id)); if(!x)return; if(x.status==='draft'){if(confirm('این پیش‌نویس حذف شود؟')){await DB.delete('invoices',Number(id));toast('پیش‌نویس حذف شد');renderInvoices(App);}} else {if(confirm('فاکتور لغو شود؟ فاکتورهای ثبت‌شده حذف نمی‌شوند و فقط لغو می‌شوند.')){await DB.put('invoices',{...x,status:'cancelled'});toast('فاکتور لغو شد');renderInvoices(App);}} }
     });
     list.querySelector('#add-empty')?.addEventListener('click', () => form());
@@ -230,6 +230,7 @@ function invoiceMarkup(x,settings,customer=null,project=null){
       </div>
       <div class="invoice-title-block"><div class="invoice-doc-label">فاکتور فروش</div><div class="invoice-doc-number">شماره: <strong>${esc(x.number)}</strong></div></div>
     </div>
+    <div class="invoice-document-title"><div class="invoice-doc-label">فاکتور فروش</div><div class="invoice-doc-number">شماره: <strong>${esc(x.number)}</strong></div></div>
     <div class="invoice-accent"></div>
     <div class="invoice-parties-grid">
       <div class="invoice-party-card"><div class="invoice-party-title">فروشنده</div><strong>${esc(settings.businessName||'DIA Sanat')}</strong>${sellerLines.map(v=>`<span>${esc(v)}</span>`).join('')}</div>
