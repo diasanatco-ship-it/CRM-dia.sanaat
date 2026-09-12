@@ -1,9 +1,9 @@
 // sw.js — کش‌کردن اپ برای اجرای کامل آفلاین (بدون نیاز به سرور/CDN)
-const CACHE = 'dia-business-v2-2';
+const CACHE = 'dia-business-v2-7-freeze1';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './css/style.css', './css/print.css',
-  './js/app.js', './js/db.js', './js/utils.js', './js/router.js', './js/validators.js', './js/components.js',
+  './js/app.js', './js/db.js', './js/utils.js', './js/invoice-engine.js', './js/router.js', './js/validators.js', './js/components.js',
   './js/views/dashboard.js', './js/views/customers.js', './js/views/customer-detail.js',
   './js/views/products.js', './js/views/services.js', './js/views/projects.js',
   './js/views/invoices.js', './js/views/accounting.js', './js/views/reports.js', './js/views/settings.js',
