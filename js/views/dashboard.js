@@ -1,5 +1,5 @@
 import { DB } from '../db.js';
-import { money, num, dateFa, esc, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, totalReceivables, financialSummary, dateToTimestamp, isExpenseType } from '../utils.js';
+import { money, num, dateFa, esc, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, faLabel, icon, totalReceivables, financialSummary, customerPaymentEntries, dateToTimestamp, isExpenseType } from '../utils.js';
 import { pageHeader } from '../components.js';
 import { navigate } from '../router.js';
 
@@ -7,12 +7,13 @@ export async function renderDashboard(App) {
   const [invoices,transactions,products,customers]=await Promise.all([DB.all('invoices'),DB.all('transactions'),DB.all('products'),DB.all('customers')]);
   const now=new Date(); const monthStart=new Date(now.getFullYear(),now.getMonth(),1).getTime(); const inMonth=d=>{const t=dateToTimestamp(d);return Number.isFinite(t)&&t>=monthStart;};
   const valid=invoices.filter(i=>i.status!=='cancelled');
-  const sales=valid.reduce((s,i)=>s+(i.total||0),0);
-  const salesMonth=valid.filter(i=>inMonth(i.date||i.createdAt)).reduce((s,i)=>s+(i.total||0),0);
+  const sales=valid.reduce((s,i)=>s+(Number(i.total)||0),0);
+  const salesMonth=valid.filter(i=>inMonth(i.date||i.createdAt)).reduce((s,i)=>s+(Number(i.total)||0),0);
+  const paymentEntries=customerPaymentEntries(invoices,transactions);
   const received=financialSummary(invoices,transactions).received;
-  const receivedMonth=valid.filter(i=>inMonth(i.date||i.createdAt)).reduce((sum,i)=>{const linked=transactions.filter(t=>String(t.invoiceId)===String(i.id)&&t.type==='customer_payment');return sum+(linked.length?linked.reduce((s,t)=>s+(Number(t.amount)||0),0):Math.max(0,Number(i.paidAmount)||0));},0)+transactions.filter(t=>t.type==='customer_payment'&&!t.invoiceId&&inMonth(t.date||t.createdAt)).reduce((s,t)=>s+(Number(t.amount)||0),0);
-  const expenses=transactions.filter(t=>isExpenseType(t.type)).reduce((s,t)=>s+(t.amount||0),0);
-  const expensesMonth=transactions.filter(t=>isExpenseType(t.type)&&inMonth(t.date||t.createdAt)).reduce((s,t)=>s+(t.amount||0),0);
+  const receivedMonth=paymentEntries.filter(t=>inMonth(t.date||t.createdAt)).reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const expenses=transactions.filter(t=>isExpenseType(t.type)).reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const expensesMonth=transactions.filter(t=>isExpenseType(t.type)&&inMonth(t.date||t.createdAt)).reduce((s,t)=>s+(Number(t.amount)||0),0);
   const receivable=totalReceivables(customers,invoices,transactions);
   const stockValue=products.reduce((s,p)=>s+(Number(p.stock)||0)*(Number(p.purchasePrice)||0),0);
   const latest=valid.sort((a,b)=>b.createdAt-a.createdAt).slice(0,5);

@@ -1,6 +1,6 @@
 import { DB } from '../db.js';
 import { money, num, dateFa, esc, printWithClass, faLabel, INVOICE_STATUS_LABELS, INVOICE_STATUS_BADGE, icon, buildCustomerLedger, toast } from '../utils.js';
-import { normalizeAmountInput } from '../validators.js';
+import { parseNormalizedNumber } from '../validators.js';
 import { todayISO } from '../utils.js';
 import { openModal, closeModal } from '../components.js';
 import { navigate } from '../router.js';
@@ -27,7 +27,7 @@ export async function renderCustomerDetail(App, params) {
   document.getElementById('print-statement').onclick=()=>printWithClass('printing-statement');
   document.getElementById('add-payment')?.addEventListener('click',()=>{
     const m=openModal(`<div class="modal-head"><h3>ثبت دریافت از ${esc(customer.name)}</h3><button class="close">${icon('x','')}</button></div><form id="customer-payment" class="form-grid" novalidate><div class="field full"><label>مانده حساب</label><input value="${money(Math.max(0,balance))}" disabled></div><div class="field full"><label>مبلغ دریافت</label><input name="amount" type="text" inputmode="decimal" autofocus></div><div class="field full"><label>شرح</label><input name="description" placeholder="مثلاً دریافت بابت حساب"></div><div class="field full"><button class="btn btn-primary btn-block">${icon('check','')}ثبت دریافت</button></div></form>`);
-    const f=m.querySelector('#customer-payment');m.querySelector('.close').onclick=closeModal;f.onsubmit=async e=>{e.preventDefault();const fd=Object.fromEntries(new FormData(f));const amount=Number(normalizeAmountInput(fd.amount))||0;if(amount<=0){toast('مبلغ دریافت باید بیشتر از صفر باشد.','error');return;}if(amount>Math.max(0,balance)){toast('مبلغ دریافت از مانده حساب بیشتر است.','error');return;}await DB.add('transactions',{type:'customer_payment',amount,customerId:id,party:customer.name,description:fd.description||'دریافت وجه',date:todayISO()});closeModal();toast('دریافت ثبت شد');renderCustomerDetail(App,params);};
+    const f=m.querySelector('#customer-payment');m.querySelector('.close').onclick=closeModal;f.onsubmit=async e=>{e.preventDefault();const fd=Object.fromEntries(new FormData(f));const amount=parseNormalizedNumber(fd.amount,{integer:true});if(amount<=0){toast('مبلغ دریافت باید بیشتر از صفر باشد.','error');return;}if(amount>Math.max(0,balance)){toast('مبلغ دریافت از مانده حساب بیشتر است.','error');return;}await DB.add('transactions',{type:'customer_payment',amount,customerId:id,party:customer.name,description:fd.description||'دریافت وجه',date:todayISO()});closeModal();toast('دریافت ثبت شد');renderCustomerDetail(App,params);};
   });
   document.querySelectorAll('[data-invoice]').forEach(b=>b.onclick=()=>navigate('#/invoices/'+b.dataset.invoice));
   document.querySelectorAll('[data-route]').forEach(b=>b.onclick=e=>{e.preventDefault();navigate(b.dataset.route)});

@@ -1,5 +1,5 @@
 import { DB } from '../db.js';
-import { money, num, dateFa, esc, isIncomeType, isExpenseType, buildCustomerLedger, invoicePaidAmount, INVOICE_STATUS_LABELS, dateToTimestamp, faLabel, icon } from '../utils.js';
+import { money, num, dateFa, esc, isExpenseType, buildCustomerLedger, invoicePaidAmount, customerPaymentEntries, INVOICE_STATUS_LABELS, dateToTimestamp, faLabel, icon } from '../utils.js';
 import { INVOICE_STATUS } from '../validators.js';
 import { pageHeader } from '../components.js';
 import { navigate } from '../router.js';
@@ -30,15 +30,13 @@ export async function renderReports(App, params={}){
   function salesReport(f){const rows=invoices.filter(i=>i.status!=='cancelled'&&filterRow(i.date||i.createdAt,f.customerId,f.status,f.from,f.to,i.customerId,i.status));const total=rows.reduce((s,i)=>s+(Number(i.total)||0),0),paid=rows.reduce((s,i)=>s+invoicePaidAmount(i,transactions),0);document.getElementById('filtered-out').innerHTML=summaryCards([['تعداد فاکتور',num(rows.length)],['فروش کل',money(total)],['دریافت‌شده',money(paid),'green'],['مطالبات',money(Math.max(0,total-paid)),'red']])+`<div class="section-title">فاکتورهای این گزارش</div><div class="report-list">${rows.sort((a,b)=>dateToTimestamp(b.date||b.createdAt)-dateToTimestamp(a.date||a.createdAt)).map(invoiceRow).join('')||'<div class="empty">موردی پیدا نشد.</div>'}</div>`;bindInvoiceRows();}
   function incomeExpenseReport(f,wantIncome){
     let rows=[];
-    if(wantIncome){
-      rows=transactions.filter(t=>t.type==='income'||t.type==='customer_payment')
+     if(wantIncome){
+       rows=transactions.filter(t=>t.type==='income')
         .filter(t=>filterRow(t.date||t.createdAt,f.customerId,null,f.from,f.to,t.customerId,null))
         .map(t=>({date:dateToTimestamp(t.date||t.createdAt),description:t.description||'بدون شرح',amount:Number(t.amount)||0,type:t.type,invoiceId:t.invoiceId||null}));
-      // Legacy invoices may have paidAmount without a linked payment transaction. Add only those.
-      invoices.filter(i=>i.status!=='cancelled'&&invoicePaidAmount(i,transactions)>0)
-        .filter(i=>!transactions.some(t=>String(t.invoiceId)===String(i.id)&&t.type==='customer_payment'))
-        .filter(i=>filterRow(i.date||i.updatedAt||i.createdAt,f.customerId,null,f.from,f.to,i.customerId,null))
-        .forEach(i=>rows.push({date:dateToTimestamp(i.date||i.updatedAt||i.createdAt),description:`دریافت فاکتور ${i.number}`,amount:invoicePaidAmount(i,transactions),type:'legacy_invoice_payment',invoiceId:i.id}));
+       rows.push(...customerPaymentEntries(invoices,transactions)
+         .filter(t=>filterRow(t.date||t.createdAt,f.customerId,null,f.from,f.to,t.customerId,null))
+         .map(t=>({date:dateToTimestamp(t.date||t.createdAt),description:t.description||'دریافت وجه',amount:Number(t.amount)||0,type:'customer_payment',invoiceId:t.invoiceId||null})));
     }else{
       rows=transactions.filter(t=>isExpenseType(t.type))
         .filter(t=>filterRow(t.date||t.createdAt,f.customerId,null,f.from,f.to,t.customerId,null))
