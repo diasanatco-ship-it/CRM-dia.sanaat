@@ -1,9 +1,11 @@
+import { normalizeAmountInput } from './validators.js';
+
 export const CURRENCY='ریال';
 export const money=(n,unit=CURRENCY)=>new Intl.NumberFormat('fa-IR').format(Math.round(Number(n)||0))+(unit?' '+unit:'');
 export const num=n=>new Intl.NumberFormat('fa-IR',{maximumFractionDigits:2}).format(Number(n)||0);
 export const formatAmountInput=value=>{
   if(value===null||value===undefined||value==='') return '';
-  const normalized=String(value).replace(/[۰-۹٠-٩]/g,ch=>{const fa='۰۱۲۳۴۵۶۷۸۹',ar='٠١٢٣٤٥٦٧٨٩';const a=fa.indexOf(ch);if(a>-1)return String(a);const b=ar.indexOf(ch);return b>-1?String(b):ch;}).replace(/[٬,\s]/g,'');
+  const normalized=normalizeAmountInput(value);
   const m=normalized.match(/^(\d+)(?:\.(\d{0,3}))?$/);
   if(!m) return value;
   const integer=new Intl.NumberFormat('fa-IR').format(Number(m[1]));
@@ -13,7 +15,7 @@ export function bindAmountInput(input, options={}){
   if(!input) return;
   const allowDecimal=options.allowDecimal!==false;
   const format=()=>{
-    const raw=String(input.value??'').replace(/[۰-۹٠-٩]/g,ch=>{const fa='۰۱۲۳۴۵۶۷۸۹',ar='٠١٢٣٤٥٦٧٨٩';const a=fa.indexOf(ch);if(a>-1)return String(a);const b=ar.indexOf(ch);return b>-1?String(b):ch;}).replace(/[٬,\s]/g,'');
+    const raw=normalizeAmountInput(input.value??'');
     if(!raw) return;
     const clean=allowDecimal?raw.replace(/[^0-9.]/g,''):raw.replace(/\D/g,'');
     const parts=clean.split('.');
@@ -234,21 +236,62 @@ export function dateToTimestamp(value){
   if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00`).getTime();
   return new Date(s).getTime();
 }
+export function customerPaymentEntries(invoices=[], transactions=[], options={}){
+  const includeCancelled=options.includeCancelled!==false;
+  const payments=transactions
+    .filter(t=>t.type==='customer_payment')
+    .map(t=>({...t,amount:Number(t.amount)||0}));
+  const linkedByInvoice=new Map();
+  payments.forEach(t=>{
+    if(t.invoiceId!=null){
+      const key=String(t.invoiceId);
+      const list=linkedByInvoice.get(key)||[];
+      list.push(t);
+      linkedByInvoice.set(key,list);
+    }
+  });
+  const legacy= invoices
+    .filter(i=>(includeCancelled||i.status!=='cancelled') && Number(i.paidAmount)>0 && !(linkedByInvoice.get(String(i.id))||[]).length)
+    .map(i=>({
+      id:`legacy-${i.id}`,
+      invoiceId:i.id,
+      customerId:i.customerId??null,
+      projectId:i.projectId??null,
+      amount:Math.max(0,Number(i.paidAmount)||0),
+      date:i.updatedAt||i.date||i.createdAt,
+      createdAt:i.updatedAt||i.createdAt,
+      description:`دریافت فاکتور ${i.number}`,
+      legacy:true
+    }));
+  return [...payments.filter(t=>includeCancelled||!t.invoiceId||!invoices.some(i=>String(i.id)===String(t.invoiceId)&&i.status==='cancelled')), ...legacy];
+}
+
 export function buildCustomerLedger(invoices=[],transactions=[],customerId){
   const cid=String(customerId);
   const its=invoices.filter(i=>String(i.customerId)===cid&&i.status!=='cancelled');
-  const pays=transactions.filter(t=>String(t.customerId)===cid&&t.type==='customer_payment');
+  const pays=customerPaymentEntries(invoices,transactions)
+    .filter(t=>String(t.customerId)===cid);
   const ledger=[];
   its.forEach(i=>{
     ledger.push({date:dateToTimestamp(i.date)||i.createdAt,desc:`فاکتور ${i.number}`,debit:Number(i.total)||0,credit:0,ref:i.id,kind:'invoice'});
     const linked=pays.filter(t=>String(t.invoiceId)===String(i.id));
     if(linked.length){
       linked.forEach(t=>ledger.push({date:dateToTimestamp(t.date)||t.createdAt||i.updatedAt||i.createdAt,desc:t.description||`دریافت فاکتور ${i.number}`,debit:0,credit:Number(t.amount)||0,ref:t.id,invoiceId:i.id,kind:'payment'}));
-    }else if(Number(i.paidAmount)>0){
-      ledger.push({date:i.updatedAt||dateToTimestamp(i.date)||i.createdAt,desc:`دریافت فاکتور ${i.number}`,debit:0,credit:Number(i.paidAmount)||0,ref:i.id,invoiceId:i.id,kind:'payment',legacy:true});
     }
   });
-  pays.filter(t=>!t.invoiceId).forEach(t=>ledger.push({date:dateToTimestamp(t.date)||t.createdAt,desc:t.description||'دریافت وجه',debit:0,credit:Number(t.amount)||0,ref:t.id,kind:'payment'}));
+  // پرداخت‌های فاکتور لغوشده حذف نمی‌شوند؛ به‌عنوان اعتبار/دریافت بدون
+  // بدهی فاکتور در گردش حساب مشتری باقی می‌مانند.
+  pays.filter(t=>!t.invoiceId || !its.some(i=>String(i.id)===String(t.invoiceId)))
+    .forEach(t=>ledger.push({
+      date:dateToTimestamp(t.date)||t.createdAt,
+      desc:t.description||'دریافت وجه',
+      debit:0,
+      credit:Number(t.amount)||0,
+      ref:t.id,
+      invoiceId:t.invoiceId,
+      kind:'payment',
+      legacy:!!t.legacy
+    }));
   ledger.sort((a,b)=>a.date-b.date||String(a.kind).localeCompare(String(b.kind)));
   let running=0; ledger.forEach(r=>{running+=r.debit-r.credit;r.balance=running;});
   const total=its.reduce((s,i)=>s+(Number(i.total)||0),0);
@@ -261,10 +304,22 @@ export function invoicePaidAmount(invoice, transactions=[]){
 }
 export function financialSummary(invoices=[],transactions=[]){
   const valid=invoices.filter(i=>i.status!=='cancelled');
-  const received=valid.reduce((sum,i)=>{
-    return sum+invoicePaidAmount(i,transactions);
-  },0) + transactions.filter(t=>t.type==='customer_payment'&&!t.invoiceId).reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const received=customerPaymentEntries(invoices,transactions)
+    .reduce((sum,t)=>sum+(Number(t.amount)||0),0);
   return {sales:valid.reduce((s,i)=>s+(Number(i.total)||0),0),received};
+}
+export function projectFinancialSummary(project={},invoices=[],transactions=[]){
+  const pid=String(project.id);
+  const projectInvoices=invoices.filter(i=>String(i.projectId)===pid&&i.status!=='cancelled');
+  const billed=projectInvoices.reduce((s,i)=>s+(Number(i.total)||0),0);
+  const invoiceById=new Map(invoices.map(i=>[String(i.id),i]));
+  const received=customerPaymentEntries(invoices,transactions)
+    .filter(t=>String(t.projectId)===pid||String(invoiceById.get(String(t.invoiceId))?.projectId)===pid)
+    .reduce((s,t)=>s+(Number(t.amount)||0),0);
+  const costs=transactions
+    .filter(t=>String(t.projectId)===pid&&isExpenseType(t.type))
+    .reduce((s,t)=>s+(Number(t.amount)||0),0)+(Number(project.cost)||0);
+  return {billed,received,costs,profit:billed-costs};
 }
 export function totalReceivables(customers=[],invoices=[],transactions=[]){
   return customers.reduce((sum,c)=>sum+Math.max(0,buildCustomerLedger(invoices,transactions,c.id).balance),0);

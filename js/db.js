@@ -1,6 +1,8 @@
 // DIA Business — IndexedDB data layer. No UI/DOM logic here.
 const DB_NAME = 'DIA_Business_DB';
 const DB_VERSION = 2;
+const BACKUP_APP = 'DIA-Business';
+const BACKUP_DATA_VERSION = 1;
 export const stores = ['customers','products','services','projects','invoices','transactions','accounts','settings'];
 export const SETTINGS_ID = 'app';
 const DEFAULT_SETTINGS = {
@@ -136,9 +138,25 @@ async function migrateInvoiceTaxSnapshots(){
 }
 export async function getSettings(){const s=await DB.get('settings',SETTINGS_ID);if(!s?.rialMigrationV1) await migrateLegacyTomanDataToRial();await migrateInvoiceTaxSnapshots();const fresh=await DB.get('settings',SETTINGS_ID);return {...DEFAULT_SETTINGS,...(fresh||{})};}
 export async function saveSettings(patch){const merged={...await getSettings(),...patch,id:SETTINGS_ID};await DB.put('settings',merged);return merged;}
-export async function exportDatabase(){const out={app:'DIA-Business',version:DB_VERSION,exportedAt:new Date().toISOString(),stores:{}};for(const s of stores)out.stores[s]=await DB.all(s);return out;}
+export function validateBackup(data){
+  if(!data||typeof data!=='object'||Array.isArray(data)) throw new Error('فایل پشتیبان معتبر نیست.');
+  if(data.app!==BACKUP_APP) throw new Error('این فایل متعلق به برنامه DIA نیست.');
+  const schemaVersion=Number(data.schemaVersion??data.version);
+  if(!Number.isInteger(schemaVersion)||schemaVersion<1||schemaVersion>DB_VERSION) throw new Error('نسخه ساختار فایل پشتیبان پشتیبانی نمی‌شود.');
+  // dataVersion was added after the first V2 backup format. Missing means
+  // legacy data format 1, which remains importable without data loss.
+  const dataVersion=Number(data.dataVersion??BACKUP_DATA_VERSION);
+  if(!Number.isInteger(dataVersion)||dataVersion<1||dataVersion>BACKUP_DATA_VERSION) throw new Error('نسخه داده فایل پشتیبان پشتیبانی نمی‌شود.');
+  if(!data.stores||typeof data.stores!=='object'||Array.isArray(data.stores)) throw new Error('ساختار داده‌های فایل پشتیبان نامعتبر است.');
+  for(const store of stores){
+    if(!Array.isArray(data.stores[store])) throw new Error(`داده‌های بخش ${store} در فایل پشتیبان نامعتبر است.`);
+    if(data.stores[store].some(row=>!row||typeof row!=='object'||Array.isArray(row))) throw new Error(`رکوردهای بخش ${store} در فایل پشتیبان نامعتبر است.`);
+  }
+  return {schemaVersion,dataVersion};
+}
+export async function exportDatabase(){const out={app:BACKUP_APP,version:DB_VERSION,schemaVersion:DB_VERSION,dataVersion:BACKUP_DATA_VERSION,exportedAt:new Date().toISOString(),stores:{}};for(const s of stores)out.stores[s]=await DB.all(s);return out;}
 export async function importDatabase(data){
-  if(!data||typeof data!=='object'||!data.stores) throw new Error('فایل پشتیبان معتبر نیست.');
+  validateBackup(data);
   const db=await openDB();
   await new Promise((resolve,reject)=>{
     const t=db.transaction(stores,'readwrite');

@@ -21,7 +21,20 @@ export function normalizeAmountInput(value) {
   if (value === null || value === undefined) return '';
   let s = normalizeDigits(String(value)).trim();
   s = s.replace(/[,\u066C\u060C\s]/g, ''); // کاما، جداکننده هزارگان فارسی/عربی، فاصله
+  s = s.replace(/\u066B/g, '.'); // ممیز عربی
   return s;
+}
+
+// تنها مسیر تبدیل ورودی عددی فرم‌ها به Number. مقدار نامعتبر یا خالی
+// هرگز به صورت NaN به لایه ذخیره‌سازی تحویل داده نمی‌شود.
+export function parseNormalizedNumber(value, options = {}) {
+  const { defaultValue = 0, integer = false } = options;
+  const raw = normalizeAmountInput(value);
+  if (raw === '') return defaultValue;
+  if (!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw)) return defaultValue;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return defaultValue;
+  return integer ? Math.trunc(parsed) : parsed;
 }
 
 function isEmpty(value) {
