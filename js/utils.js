@@ -1,5 +1,5 @@
 import { normalizeAmountInput } from './validators.js';
-
+export { isIncomeType, isExpenseType, dateToTimestamp, effectiveTimestamp, buildCustomerLedger, invoicePaidAmount, financialSummary, totalReceivables } from './finance.js';
 export const CURRENCY='ریال';
 export const money=(n,unit=CURRENCY)=>new Intl.NumberFormat('fa-IR').format(Math.round(Number(n)||0))+(unit?' '+unit:'');
 export const num=n=>new Intl.NumberFormat('fa-IR',{maximumFractionDigits:2}).format(Number(n)||0);
@@ -15,7 +15,8 @@ export function bindAmountInput(input, options={}){
   if(!input) return;
   const allowDecimal=options.allowDecimal!==false;
   const format=()=>{
-    const raw=normalizeAmountInput(input.value??'');
+    // one central normalizer: Persian/Arabic digits, ٬ ، , separators and the Arabic decimal mark ٫ (which must stay a decimal point)
+    const raw=normalizeAmountInput(input.value);
     if(!raw) return;
     const clean=allowDecimal?raw.replace(/[^0-9.]/g,''):raw.replace(/\D/g,'');
     const parts=clean.split('.');
@@ -28,8 +29,11 @@ export function bindAmountInput(input, options={}){
   input.addEventListener('blur',format);
   if(input.value) format();
 }
-export const dateFa=d=>{if(!d)return '—';const dt=new Date(d);return Number.isNaN(dt.getTime())?'—':new Intl.DateTimeFormat('fa-IR',{year:'numeric',month:'2-digit',day:'2-digit'}).format(dt);};
-export const dateTimeFa=d=>{if(!d)return '—';const dt=new Date(d);return Number.isNaN(dt.getTime())?'—':new Intl.DateTimeFormat('fa-IR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(dt);};
+const toLocalDate=d=>{if(typeof d==='string'){const m=d.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(m)return new Date(Number(m[1]),Number(m[2])-1,Number(m[3]));}return new Date(d);};
+export const dateFa=d=>{if(!d)return '—';const dt=toLocalDate(d);return Number.isNaN(dt.getTime())?'—':new Intl.DateTimeFormat('fa-IR',{year:'numeric',month:'2-digit',day:'2-digit'}).format(dt);};
+export const dateTimeFa=d=>{if(!d)return '—';const dt=toLocalDate(d);return Number.isNaN(dt.getTime())?'—':new Intl.DateTimeFormat('fa-IR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(dt);};
+// Per-form idempotency token: generated once when a form opens and sent with the write, so a retry/double tap can never book twice.
+export const newToken=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,9);
 export const uid=()=>Date.now()+Math.floor(Math.random()*100000);
 export const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 export const icon=(name,label='',cls='icon')=>`<img class="${cls}" src="./assets/icons/${name}.svg" alt="${esc(label)}" aria-hidden="${label?'false':'true'}">`;
@@ -226,105 +230,37 @@ export const amountToWordsFa=(n)=>numberToWordsFa(n)+' ریال';
 export const INVOICE_STATUS_LABELS={draft:'پیش‌نویس',issued:'صادر شده',partially_paid:'پرداخت جزئی',paid:'پرداخت شده',cancelled:'لغو شده'};
 export const INVOICE_STATUS_BADGE={draft:'muted',issued:'info',partially_paid:'warn',paid:'paid',cancelled:'danger'};
 export const PROJECT_STATUS_LABELS={planned:'در انتظار',active:'در حال اجرا',completed:'تمام شده',cancelled:'لغو شده'};
-export const TRANSACTION_TYPE_LABELS={income:'درآمد',expense:'هزینه',customer_payment:'دریافت از مشتری',supplier_payment:'پرداخت به تأمین‌کننده',other_expense:'پرداخت سایر هزینه‌ها'};
-export const isIncomeType=t=>t==='income'||t==='customer_payment';
-export const isExpenseType=t=>t==='expense'||t==='supplier_payment'||t==='other_expense';
-export function dateToTimestamp(value){
-  if(value===null||value===undefined||value==='') return NaN;
-  if(typeof value==='number') return value;
-  const s=String(value);
-  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00`).getTime();
-  return new Date(s).getTime();
-}
-export function customerPaymentEntries(invoices=[], transactions=[], options={}){
-  const includeCancelled=options.includeCancelled!==false;
-  const payments=transactions
-    .filter(t=>t.type==='customer_payment')
-    .map(t=>({...t,amount:Number(t.amount)||0}));
-  const linkedByInvoice=new Map();
-  payments.forEach(t=>{
-    if(t.invoiceId!=null){
-      const key=String(t.invoiceId);
-      const list=linkedByInvoice.get(key)||[];
-      list.push(t);
-      linkedByInvoice.set(key,list);
-    }
-  });
-  const legacy= invoices
-    .filter(i=>(includeCancelled||i.status!=='cancelled') && Number(i.paidAmount)>0 && !(linkedByInvoice.get(String(i.id))||[]).length)
-    .map(i=>({
-      id:`legacy-${i.id}`,
-      invoiceId:i.id,
-      customerId:i.customerId??null,
-      projectId:i.projectId??null,
-      amount:Math.max(0,Number(i.paidAmount)||0),
-      date:i.updatedAt||i.date||i.createdAt,
-      createdAt:i.updatedAt||i.createdAt,
-      description:`دریافت فاکتور ${i.number}`,
-      legacy:true
-    }));
-  return [...payments.filter(t=>includeCancelled||!t.invoiceId||!invoices.some(i=>String(i.id)===String(t.invoiceId)&&i.status==='cancelled')), ...legacy];
-}
-
-export function buildCustomerLedger(invoices=[],transactions=[],customerId){
-  const cid=String(customerId);
-  const its=invoices.filter(i=>String(i.customerId)===cid&&i.status!=='cancelled');
-  const pays=customerPaymentEntries(invoices,transactions)
-    .filter(t=>String(t.customerId)===cid);
-  const ledger=[];
-  its.forEach(i=>{
-    ledger.push({date:dateToTimestamp(i.date)||i.createdAt,desc:`فاکتور ${i.number}`,debit:Number(i.total)||0,credit:0,ref:i.id,kind:'invoice'});
-    const linked=pays.filter(t=>String(t.invoiceId)===String(i.id));
-    if(linked.length){
-      linked.forEach(t=>ledger.push({date:dateToTimestamp(t.date)||t.createdAt||i.updatedAt||i.createdAt,desc:t.description||`دریافت فاکتور ${i.number}`,debit:0,credit:Number(t.amount)||0,ref:t.id,invoiceId:i.id,kind:'payment'}));
-    }
-  });
-  // پرداخت‌های فاکتور لغوشده حذف نمی‌شوند؛ به‌عنوان اعتبار/دریافت بدون
-  // بدهی فاکتور در گردش حساب مشتری باقی می‌مانند.
-  pays.filter(t=>!t.invoiceId || !its.some(i=>String(i.id)===String(t.invoiceId)))
-    .forEach(t=>ledger.push({
-      date:dateToTimestamp(t.date)||t.createdAt,
-      desc:t.description||'دریافت وجه',
-      debit:0,
-      credit:Number(t.amount)||0,
-      ref:t.id,
-      invoiceId:t.invoiceId,
-      kind:'payment',
-      legacy:!!t.legacy
-    }));
-  ledger.sort((a,b)=>a.date-b.date||String(a.kind).localeCompare(String(b.kind)));
-  let running=0; ledger.forEach(r=>{running+=r.debit-r.credit;r.balance=running;});
-  const total=its.reduce((s,i)=>s+(Number(i.total)||0),0);
-  const paid=ledger.reduce((s,r)=>s+(Number(r.credit)||0),0);
-  return {invoices:its,transactions:pays,ledger,total,paid,balance:total-paid};
-}
-export function invoicePaidAmount(invoice, transactions=[]){
-  const linked=transactions.filter(t=>String(t.invoiceId)===String(invoice.id)&&t.type==='customer_payment');
-  return linked.length ? linked.reduce((s,t)=>s+(Number(t.amount)||0),0) : Math.max(0,Number(invoice.paidAmount)||0);
-}
-export function financialSummary(invoices=[],transactions=[]){
-  const valid=invoices.filter(i=>i.status!=='cancelled');
-  const received=customerPaymentEntries(invoices,transactions)
-    .reduce((sum,t)=>sum+(Number(t.amount)||0),0);
-  return {sales:valid.reduce((s,i)=>s+(Number(i.total)||0),0),received};
-}
-export function projectFinancialSummary(project={},invoices=[],transactions=[]){
-  const pid=String(project.id);
-  const projectInvoices=invoices.filter(i=>String(i.projectId)===pid&&i.status!=='cancelled');
-  const billed=projectInvoices.reduce((s,i)=>s+(Number(i.total)||0),0);
-  const invoiceById=new Map(invoices.map(i=>[String(i.id),i]));
-  const received=customerPaymentEntries(invoices,transactions)
-    .filter(t=>String(t.projectId)===pid||String(invoiceById.get(String(t.invoiceId))?.projectId)===pid)
-    .reduce((s,t)=>s+(Number(t.amount)||0),0);
-  const costs=transactions
-    .filter(t=>String(t.projectId)===pid&&isExpenseType(t.type))
-    .reduce((s,t)=>s+(Number(t.amount)||0),0)+(Number(project.cost)||0);
-  return {billed,received,costs,profit:billed-costs};
-}
-export function totalReceivables(customers=[],invoices=[],transactions=[]){
-  return customers.reduce((sum,c)=>sum+Math.max(0,buildCustomerLedger(invoices,transactions,c.id).balance),0);
-}
-
+export const TRANSACTION_TYPE_LABELS={income:'درآمد',expense:'هزینه',customer_payment:'دریافت از مشتری',supplier_payment:'پرداخت به تأمین‌کننده',other_expense:'پرداخت سایر هزینه‌ها',customer_refund:'برگشت وجه به مشتری'};
 export const faLabel=(map,code)=>map[code]||code||'—';
 export function clearFieldErrors(form){form.querySelectorAll('.field-error').forEach(x=>x.remove());form.querySelectorAll('[aria-invalid]').forEach(x=>x.removeAttribute('aria-invalid'));}
-export function showValidationErrors(form,result){clearFieldErrors(form);if(result.valid)return false;result.errors.forEach(e=>{const field=form.querySelector(`[name="${CSS.escape(e.field)}"]`);if(field){field.setAttribute('aria-invalid','true');const msg=document.createElement('div');msg.className='field-error';msg.textContent=e.message;field.closest('.field')?.appendChild(msg);}});form.querySelector('[aria-invalid]')?.focus();return true;}
+export function showValidationErrors(form,result){
+  clearFieldErrors(form);
+  if(result.valid)return false;
+  const unmatched=[];
+  result.errors.forEach(e=>{
+    const field=form.querySelector(`[name="${CSS.escape(e.field)}"]`);
+    if(field){
+      field.setAttribute('aria-invalid','true');
+      const msg=document.createElement('div');msg.className='field-error';msg.textContent=e.message;
+      field.closest('.field')?.appendChild(msg);
+      // errors inside collapsed sections ("جزئیات بیشتر") must never stay invisible
+      let h=field.closest('[hidden]');while(h&&form.contains(h)){h.hidden=false;h=h.parentElement?.closest('[hidden]');}
+    }else unmatched.push(e.message);
+  });
+  // errors that belong to no single input (e.g. invoice line items) are shown as a message, not swallowed
+  if(unmatched.length)toast(unmatched[0],'error');
+  form.querySelector('[aria-invalid]')?.focus();
+  return true;
+}
+// Wrap a form submit handler: blocks double-tap re-entry and reports failures instead of failing silently.
+export function guardSubmit(handler){
+  let busy=false;
+  return async e=>{
+    e?.preventDefault?.();
+    if(busy)return;
+    busy=true;
+    try{await handler(e);}
+    catch(err){console.error(err);toast(err?.message||'ذخیره انجام نشد. دوباره تلاش کنید.','error');}
+    finally{busy=false;}
+  };
+}

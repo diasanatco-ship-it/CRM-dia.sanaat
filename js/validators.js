@@ -1,3 +1,4 @@
+import { isValidISODate } from './finance.js';
 // validators.js — لایه اعتبارسنجی خالص (بدون DOM، بدون IndexedDB، بدون UI)
 // این فایل تنها داده دریافت می‌کند و نتیجه ساختاریافته برمی‌گرداند. هیچ استثنایی برای ورودی نامعتبر کاربر پرتاب نمی‌شود.
 
@@ -16,25 +17,52 @@ export function normalizeDigits(value) {
   });
 }
 
-// رشته مبلغ فرمت‌شده (با جداکننده هزارگان فارسی/انگلیسی) را به رشته عددی خام تبدیل می‌کند.
+// رشته مبلغ/عدد ورودی کاربر را به رشته عددی استاندارد (ارقام انگلیسی، نقطه اعشار، بدون جداکننده هزارگان) تبدیل می‌کند.
+// پوشش: ارقام فارسی/عربی، جداکننده هزارگان ٬ ، ,  ، اعشار عربی ٫ ، فاصله/نویسه‌های جهت‌دهی نامرئی (iOS)، منفی یونیکد.
 export function normalizeAmountInput(value) {
   if (value === null || value === undefined) return '';
-  let s = normalizeDigits(String(value)).trim();
-  s = s.replace(/[,\u066C\u060C\s]/g, ''); // کاما، جداکننده هزارگان فارسی/عربی، فاصله
-  s = s.replace(/\u066B/g, '.'); // ممیز عربی
+  let s = normalizeDigits(String(value));
+  s = s.replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\u00a0\s]/g, '');
+  s = s.replace(/\u066B/g, '.');
+  s = s.replace(/[\u066C\u060C,]/g, '');
+  s = s.replace(/[\u2212\u2013\u2012]/g, '-');
   return s;
 }
 
-// تنها مسیر تبدیل ورودی عددی فرم‌ها به Number. مقدار نامعتبر یا خالی
-// هرگز به صورت NaN به لایه ذخیره‌سازی تحویل داده نمی‌شود.
-export function parseNormalizedNumber(value, options = {}) {
-  const { defaultValue = 0, integer = false } = options;
-  const raw = normalizeAmountInput(value);
-  if (raw === '') return defaultValue;
-  if (!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw)) return defaultValue;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return defaultValue;
-  return integer ? Math.trunc(parsed) : parsed;
+// تنها مسیر مرکزی تبدیل ورودی عددی به Number. هیچ‌وقت NaN برنمی‌گرداند مگر با valid:false.
+// خروجی: {empty, valid, value}. ورودی‌هایی مثل "1e3"، "0x10"، "abc"، "1.2.3" نامعتبر هستند.
+export function parseNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? { empty: false, valid: true, value } : { empty: false, valid: false, value: NaN };
+  const s = normalizeAmountInput(value);
+  if (s === '') return { empty: true, valid: true, value: null };
+  if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(s)) return { empty: false, valid: false, value: NaN };
+  const n = Number(s);
+  return Number.isFinite(n) ? { empty: false, valid: true, value: n } : { empty: false, valid: false, value: NaN };
+}
+// مقدار عددی امن برای ذخیره: خالی/نامعتبر => fallback (پیش‌فرض ۰). اعتبارسنجی باید قبل از این انجام شده باشد.
+export function toNumber(value, fallback = 0) {
+  const r = parseNumber(value);
+  return r.valid && !r.empty ? r.value : fallback;
+}
+// مبلغ (ریال): عدد صحیح
+export const toMoney = (value, fallback = 0) => Math.round(toNumber(value, fallback));
+
+// ------ تشخیص تکراری بودن (کد مشتری/کالا/خدمت، موبایل، شماره فاکتور) ------
+export const canonicalCode = v => normalizeDigits(String(v ?? '')).replace(/[\u200b-\u200f\u202a-\u202e\s]/g, '').toLowerCase();
+export function canonicalMobile(v) {
+  let s = normalizeDigits(String(v ?? '')).replace(/[\s\-()\u200b-\u200f]/g, '');
+  if (s.startsWith('+98')) s = '0' + s.slice(3);
+  else if (s.startsWith('0098')) s = '0' + s.slice(4);
+  else if (s.startsWith('98') && s.length === 12) s = '0' + s.slice(2);
+  return s;
+}
+// اگر rows رکوردی (غیر از خود رکورد) با همان مقدار داشته باشد آن را برمی‌گرداند. مقدار خالی هیچ‌وقت تکراری نیست.
+// اگر مقدار نسبت به مقدار قبلی همین رکورد تغییر نکرده، بررسی انجام نمی‌شود (داده‌های Legacy ویرایش‌پذیر می‌مانند).
+export function findDuplicate(rows, field, value, { excludeId = null, canon = canonicalCode, previous = undefined } = {}) {
+  const v = canon(value);
+  if (!v) return null;
+  if (previous !== undefined && canon(previous) === v) return null;
+  return (rows || []).find(r => (excludeId === null || String(r.id) !== String(excludeId)) && canon(r[field]) === v) || null;
 }
 
 function isEmpty(value) {
@@ -85,9 +113,10 @@ export function validateString(value, fieldName, options = {}) {
 
 export function validateNumber(value, fieldName, options = {}) {
   const { required = false, min, max, allowZero = true } = options;
-  if (isEmpty(value)) return required ? fail(fieldName, `${labelFa(fieldName)} الزامی است`) : ok();
-  const n = Number(normalizeAmountInput(value));
-  if (!isFinite(n) || isNaN(n)) return fail(fieldName, `${labelFa(fieldName)} باید یک عدد معتبر باشد`);
+  const r = parseNumber(value);
+  if (r.empty) return required ? fail(fieldName, `${labelFa(fieldName)} الزامی است`) : ok();
+  if (!r.valid) return fail(fieldName, `${labelFa(fieldName)} باید یک عدد معتبر باشد`);
+  const n = r.value;
   if (!allowZero && n === 0) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند صفر باشد`);
   if (min !== undefined && n < min) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند کمتر از ${min} باشد`);
   if (max !== undefined && n > max) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند بیشتر از ${max} باشد`);
@@ -97,21 +126,22 @@ export function validateNumber(value, fieldName, options = {}) {
 export function validateInteger(value, fieldName, options = {}) {
   const base = validateNumber(value, fieldName, options);
   if (!base.valid) return base;
-  if (isEmpty(value)) return base;
-  const n = Number(normalizeAmountInput(value));
-  if (!Number.isInteger(n)) return fail(fieldName, `${labelFa(fieldName)} باید عدد صحیح باشد`);
+  const r = parseNumber(value);
+  if (r.empty) return base;
+  if (!Number.isInteger(r.value)) return fail(fieldName, `${labelFa(fieldName)} باید عدد صحیح باشد`);
   return ok();
 }
 
-// مبلغ: می‌تواند رشته فرمت‌شده با جداکننده هزارگان یا اعداد فارسی باشد.
+// مبلغ: می‌تواند رشته فرمت‌شده با جداکننده هزارگان یا اعداد فارسی/عربی باشد. منفی هیچ‌وقت مجاز نیست.
+// allowDecimal:false برای مبالغ ریالی (عدد صحیح)؛ برای تعداد/درصد اعشار مجاز است.
 export function validateAmount(value, fieldName, options = {}) {
-  const { required = false, allowZero = true, max } = options;
-  if (isEmpty(value)) return required ? fail(fieldName, `${labelFa(fieldName)} الزامی است`) : ok();
-  const raw = normalizeAmountInput(value);
-  if (raw === '' || raw === '-') return fail(fieldName, `${labelFa(fieldName)} باید یک عدد معتبر باشد`);
-  const n = Number(raw);
-  if (isNaN(n) || !isFinite(n)) return fail(fieldName, `${labelFa(fieldName)} باید یک عدد معتبر باشد`);
+  const { required = false, allowZero = true, max, allowDecimal = true } = options;
+  const r = parseNumber(value);
+  if (r.empty) return required ? fail(fieldName, `${labelFa(fieldName)} الزامی است`) : ok();
+  if (!r.valid) return fail(fieldName, `${labelFa(fieldName)} باید یک عدد معتبر باشد`);
+  const n = r.value;
   if (n < 0) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند منفی باشد`);
+  if (!allowDecimal && !Number.isInteger(n)) return fail(fieldName, `${labelFa(fieldName)} باید عدد صحیح (بدون اعشار) باشد`);
   if (!allowZero && n === 0) return fail(fieldName, `${labelFa(fieldName)} باید بزرگ‌تر از صفر باشد`);
   if (max !== undefined && n > max) return fail(fieldName, `${labelFa(fieldName)} نمی‌تواند بیشتر از ${max} باشد`);
   return ok();
@@ -168,7 +198,7 @@ export function isValidId(value) {
 const FIELD_LABELS = {
   name: 'نام', customerName: 'نام مشتری', companyName: 'نام شرکت', phone: 'شماره تماس', mobile: 'موبایل', email: 'ایمیل',
   address: 'آدرس', customerCode: 'کد مشتری', notes: 'توضیحات', code: 'کد', category: 'دسته‌بندی', unit: 'واحد',
-  purchasePrice: 'قیمت خرید', salePrice: 'قیمت فروش', stock: 'موجودی', minStock: 'حداقل موجودی', price: 'قیمت',
+  purchasePrice: 'قیمت خرید', salePrice: 'قیمت فروش', stock: 'موجودی', minStock: 'حداقل موجودی', price: 'قیمت', cost: 'هزینه',
   description: 'شرح', budget: 'بودجه', startDate: 'تاریخ شروع', endDate: 'تاریخ پایان', status: 'وضعیت',
   customerId: 'مشتری', invoiceNumber: 'شماره فاکتور', date: 'تاریخ', items: 'اقلام فاکتور', discount: 'تخفیف',
   tax: 'مالیات', paidAmount: 'مبلغ پرداختی', type: 'نوع', itemId: 'کالا/خدمت', quantity: 'تعداد', unitPrice: 'قیمت واحد',
@@ -214,8 +244,8 @@ export function validateProduct(data = {}) {
     () => validateString(data.code, 'code', { maxLength: 40 }),
     () => validateString(data.category, 'category', { maxLength: 80 }),
     () => validateString(data.unit, 'unit', { maxLength: 20 }),
-    () => validateAmount(data.purchasePrice, 'purchasePrice'),
-    () => validateAmount(data.salePrice, 'salePrice'),
+    () => validateAmount(data.purchasePrice, 'purchasePrice', { allowDecimal: false }),
+    () => validateAmount(data.salePrice, 'salePrice', { allowDecimal: false }),
     () => validateNumber(data.stock, 'stock', { min: 0 }),
     () => validateNumber(data.minStock, 'minStock', { min: 0 })
   ]);
@@ -226,7 +256,7 @@ export function validateService(data = {}) {
     () => validateString(data.name, 'name', { required: true, maxLength: 150 }),
     () => validateString(data.code, 'code', { maxLength: 40 }),
     () => validateString(data.unit, 'unit', { maxLength: 20 }),
-    () => validateAmount(data.price, 'price'),
+    () => validateAmount(data.price, 'price', { allowDecimal: false }),
     () => validateString(data.description, 'description', { maxLength: 1000 })
   ]);
 }
@@ -235,7 +265,8 @@ export function validateProject(data = {}) {
   const errs = collectErrors([
     () => validateString(data.name, 'name', { required: true, maxLength: 150 }),
     () => (isEmpty(data.customerId) ? ok() : (isValidId(data.customerId) ? ok() : fail('customerId', 'مشتری انتخاب‌شده معتبر نیست'))),
-    () => validateAmount(data.budget, 'budget'),
+    () => validateAmount(data.budget, 'budget', { allowDecimal: false }),
+    () => validateAmount(data.cost, 'cost', { allowDecimal: false }),
     () => (data.status ? (isValidProjectStatus(data.status) ? ok() : fail('status', 'وضعیت پروژه معتبر نیست')) : ok()),
     () => validateDate(data.startDate, 'startDate'),
     () => validateDate(data.endDate, 'endDate')
@@ -298,7 +329,7 @@ export function validateInvoice(data = {}) {
   const invoiceDiscountAmount = data.discountType === 'percent' ? calculatedSubtotal * Math.min(100, Number(normalizeAmountInput(invoiceDiscountInput))||0) / 100 : Number(normalizeAmountInput(invoiceDiscountInput))||0;
   if (discRes.valid && invoiceDiscountAmount > Math.round(calculatedSubtotal)) errors.push({ field: 'discount', message: 'تخفیف کلی نمی‌تواند بیشتر از جمع اقلام باشد' });
   const taxRes = validateAmount(data.tax, 'tax'); if (!taxRes.valid) errors.push(...taxRes.errors);
-  const paidRes = validateAmount(data.paidAmount, 'paidAmount'); if (!paidRes.valid) errors.push(...paidRes.errors);
+  const paidRes = validateAmount(data.paidAmount, 'paidAmount', { allowDecimal: false }); if (!paidRes.valid) errors.push(...paidRes.errors);
   if (data.status && !isValidInvoiceStatus(data.status)) errors.push({ field: 'status', message: 'وضعیت فاکتور معتبر نیست' });
 
   if (paidRes.valid && !isEmpty(data.paidAmount) && typeof data.total === 'number' && data.allowOverpayment !== true) {
@@ -310,13 +341,15 @@ export function validateInvoice(data = {}) {
 export function validateTransaction(data = {}) {
   const errors = [];
   if (!isValidTransactionType(data.type)) errors.push({ field: 'type', message: 'نوع تراکنش معتبر نیست' });
-  const amtRes = validateAmount(data.amount, 'amount', { required: true, allowZero: false });
+  const amtRes = validateAmount(data.amount, 'amount', { required: true, allowZero: false, allowDecimal: false });
   if (!amtRes.valid) errors.push(...amtRes.errors);
-  const dateRes = validateDate(data.date, 'date', { required: true });
-  if (!dateRes.valid) errors.push(...dateRes.errors);
+  // تاریخ مالی تراکنش باید یک روز واقعی با قالب YYYY-MM-DD باشد (در رکورد ذخیره می‌شود، نه فقط در UI)
+  if (isEmpty(data.date)) errors.push({ field: 'date', message: `${labelFa('date')} الزامی است` });
+  else if (!isValidISODate(String(data.date))) errors.push({ field: 'date', message: `${labelFa('date')} معتبر نیست` });
   const descRes = validateString(data.description, 'description', { required: true, maxLength: 300 });
   if (!descRes.valid) errors.push(...descRes.errors);
   if (!isEmpty(data.customerId) && !isValidId(data.customerId)) errors.push({ field: 'customerId', message: 'مشتری انتخاب‌شده معتبر نیست' });
+  if (data.type === 'customer_payment' && isEmpty(data.customerId)) errors.push({ field: 'customerId', message: 'برای دریافت از مشتری، انتخاب مشتری الزامی است' });
   if (!isEmpty(data.supplierId) && !isValidId(data.supplierId)) errors.push({ field: 'supplierId', message: 'تأمین‌کننده انتخاب‌شده معتبر نیست' });
   const notesRes = validateString(data.notes, 'notes', { maxLength: 1000 });
   if (!notesRes.valid) errors.push(...notesRes.errors);

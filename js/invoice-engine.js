@@ -28,9 +28,7 @@ export function calculateInvoice(items = [], options = {}) {
   const tax = options.taxEnabled ? roundMoney(taxableAmount * taxPercent / 100) : 0;
   const extraCosts = roundMoney(nonNegative(options.extraCosts));
   const total = Math.max(0, taxableAmount + tax + extraCosts);
-  // Do not silently truncate an overpayment. Validation/policy decides whether
-  // it is accepted; the calculation layer must preserve the entered amount.
-  const paidAmount = roundMoney(nonNegative(options.paidAmount));
+  const paidAmount = Math.min(total, roundMoney(nonNegative(options.paidAmount)));
   const remainingAmount = Math.max(0, total - paidAmount);
 
   return {
@@ -49,8 +47,7 @@ export function calculateInvoice(items = [], options = {}) {
     total,
     grandTotal: total,
     paidAmount,
-    remainingAmount,
-    overpaymentAmount: Math.max(0, paidAmount - total)
+    remainingAmount
   };
 }
 
