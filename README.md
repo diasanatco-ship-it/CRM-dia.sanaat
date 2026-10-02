@@ -1,4 +1,4 @@
-# DIA Business V2.7 Freeze Hardening
+# DIA Business V2.8 — Phase 1 (Financial Integrity)
 
 حسابداری و مدیریت کسب‌وکار مهندسی برق؛ Mobile First، SPA، Vanilla JS، IndexedDB و Offline/PWA.
 
@@ -55,3 +55,13 @@ assets/
 ## توجه درباره Offline
 
 برای نصب PWA، برنامه را از یک HTTPS static host مانند GitHub Pages اجرا کنید. Service Worker روی `file://` فعال نمی‌شود.
+
+## V2.8 Phase 1 — یکپارچگی مالی و داده
+
+- `js/finance.js`: تنها منبع قواعد مالی (Ledger، دریافت‌ها، وضعیت فاکتور، پروژه، سیاست پرداخت).
+- تاریخ تراکنش (`date`) واقعاً ذخیره می‌شود؛ رکوردهای قدیمی بدون `date` به `createdAt` برمی‌گردند.
+- ورود اعداد فارسی/عربی از مسیر مرکزی `parseNumber/toNumber/toMoney` (validators.js)؛ NaN هرگز ذخیره نمی‌شود (گارد در db.js).
+- هر دریافت فقط یک‌بار شمرده می‌شود؛ فاکتور لغوشده، دریافت‌شده‌ها را به‌صورت بستانکاری مشتری نگه می‌دارد.
+- مشتری/پروژه/کالا/خدمت دارای سابقه حذف نمی‌شوند؛ آرشیو می‌شوند (`archived:true`).
+- Backup: اعتبارسنجی کامل (`app`، `version`، `dataVersion`، stores) قبل از Restore؛ فایل نامعتبر داده‌ای را تغییر نمی‌دهد.
+- Inventory (کاهش موجودی با فاکتور) عمداً در این Phase نیست.
