@@ -1,9 +1,9 @@
 // sw.js — کش‌کردن اپ برای اجرای کامل آفلاین (بدون نیاز به سرور/CDN)
-const CACHE = 'dia-business-v2-9-phase2';
+const CACHE = 'dia-business-v2-11-phase4';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './css/style.css', './css/print.css',
-  './js/app.js', './js/db.js', './js/utils.js', './js/invoice-engine.js', './js/finance.js', './js/inventory.js', './js/router.js', './js/validators.js', './js/components.js',
+  './js/app.js', './js/dashboard-metrics.js', './js/db.js', './js/utils.js', './js/invoice-engine.js', './js/finance.js', './js/inventory.js', './js/router.js', './js/validators.js', './js/components.js',
   './js/views/dashboard.js', './js/views/customers.js', './js/views/customer-detail.js',
   './js/views/products.js', './js/views/services.js', './js/views/projects.js',
   './js/views/invoices.js', './js/views/accounting.js', './js/views/reports.js', './js/views/settings.js', './js/views/payment-modal.js', './js/views/stock-modal.js',
