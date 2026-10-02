@@ -1,5 +1,5 @@
 // sw.js — کش‌کردن اپ برای اجرای کامل آفلاین (بدون نیاز به سرور/CDN)
-const CACHE = 'dia-business-v2-11-phase4';
+const CACHE = 'dia-business-v2-11-phase4-navfix';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './css/style.css', './css/print.css',
