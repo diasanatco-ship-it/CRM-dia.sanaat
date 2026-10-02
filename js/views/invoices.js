@@ -233,19 +233,26 @@ export async function renderInvoiceDetail(App, params) {
   App.setView(`${pageHeader('فاکتور',{back:true,subtitle:`شماره ${invoice.number}`})}
     <div class="invoice-action-bar">
       <div class="invoice-action-status"><span class="badge badge-${invoiceStatusClass(displayInvoice.status)}">${faLabel(INVOICE_STATUS_LABELS,displayInvoice.status)}</span><strong class="invoice-detail-total">${money(displayInvoice.total)}</strong><small>${balance?`مانده ${money(balance)}`:'تسویه کامل'}${snap.refunded>0?` · برگشت وجه ${money(snap.refunded)}`:''}</small></div>
-      <div class="btn-row">
-        <button class="btn btn-primary" id="print-invoice">${icon('printer','')}چاپ</button>
-        <button class="btn btn-secondary" id="image-invoice">${icon('image','')}تصویر</button>
+      <div class="invoice-action-buttons">
+        <button class="btn btn-primary" id="print-invoice">${icon('printer','')}چاپ A4</button>
+        <button class="btn btn-secondary" id="image-invoice">${icon('image','')}تصویر / اشتراک</button>
         ${displayInvoice.status!=='cancelled'&&balance>0?`<button class="btn btn-secondary" id="payment-invoice">${icon('wallet','')}ثبت دریافت</button>`:''}
         ${snap.paid>0?`<button class="btn btn-ghost" id="refund-invoice">${icon('wallet','')}برگشت وجه</button>`:''}
         ${canReturnGoods?`<button class="btn btn-ghost" id="return-invoice">${icon('box','')}برگشت کالا</button>`:''}
         <button class="btn btn-ghost" id="edit-invoice">${icon('edit','')}ویرایش</button>
       </div>
     </div>
+    <div class="invoice-finance-strip">
+      <div><small>مبلغ فاکتور</small><strong>${money(displayInvoice.total)}</strong></div>
+      <div><small>دریافت‌شده</small><strong class="green">${money(effectivePaid)}</strong></div>
+      <div><small>مانده</small><strong class="${balance?'red':'green'}">${money(balance)}</strong></div>
+      <div><small>برگشت وجه</small><strong>${money(snap.refunded)}</strong></div>
+    </div>
+    <div class="invoice-feature-hint"><span>${icon('check','')}</span><span><strong>فاکتور آماده استفاده است</strong><small>چاپ A4، خروجی تصویر برای اشتراک، ثبت دریافت و مدیریت برگشت‌ها از همین صفحه در دسترس است.</small></span></div>
     <article id="invoice-print" class="invoice-paper detail-invoice">${invoiceMarkup(displayInvoice,settings,actualCustomer,actualProject)}</article>`);
   document.querySelector('[data-back]')?.addEventListener('click',()=>history.length>1?history.back():navigate('#/invoices'));
   document.getElementById('print-invoice').onclick=()=>printWithClass('printing-invoice');
-  document.getElementById('image-invoice').onclick=()=>invoiceToImage(document.getElementById('invoice-print'),`DIA-Invoice-${invoice.number}.png`).catch(e=>toast(e.message||'خروجی تصویر ناموفق بود','error'));
+  document.getElementById('image-invoice').onclick=async()=>{try{const r=await invoiceToImage(document.getElementById('invoice-print'),`DIA-Invoice-${invoice.number}.png`);if(r?.shared)toast('تصویر فاکتور برای اشتراک آماده شد');else if(r?.downloaded)toast('تصویر فاکتور آماده شد');}catch(e){toast(e.message||'خروجی تصویر ناموفق بود','error');}};
   document.getElementById('edit-invoice').onclick=()=>editInvoice(displayInvoice);
   document.getElementById('payment-invoice')?.addEventListener('click',()=>openPaymentModal(displayInvoice));
   document.getElementById('refund-invoice')?.addEventListener('click',()=>openRefundModal({invoiceId:invoice.id,onDone:()=>renderInvoiceDetail(App,{id:invoice.id})}));

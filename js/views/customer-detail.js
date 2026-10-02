@@ -8,7 +8,7 @@ import { pageHeader, emptyState } from '../components.js';
 
 export async function renderCustomerDetail(App, params) {
   const id=Number(params.id);
-  const [customer,invoices,transactions,allocations]=await Promise.all([DB.get('customers',id),DB.all('invoices'),DB.all('transactions'),DB.all('paymentAllocations')]);
+  const [customer,invoices,transactions,allocations,projects]=await Promise.all([DB.get('customers',id),DB.all('invoices'),DB.all('transactions'),DB.all('paymentAllocations'),DB.all('projects')]);
   if(!customer){App.setView(`${emptyState('مشتری پیدا نشد','این مشتری وجود ندارد.')}<button class="btn btn-secondary" data-route="#/customers">بازگشت</button>`);return;}
   const account=buildCustomerLedger(invoices,transactions,id,allocations);
   const openList=openInvoices(invoices,transactions,allocations,id);
@@ -17,6 +17,7 @@ export async function renderCustomerDetail(App, params) {
   const showOpen=params.query?.get('open')==='1';
   const custInvoices=account.invoices;
   const ledger=account.ledger;
+  const custProjects=projects.filter(p=>String(p.customerId)===String(id));
   const total=account.total,paid=account.paid,balance=account.balance;
   App.setView(`${pageHeader(customer.name,{back:true,action:'فاکتور جدید',actionId:'new-customer-invoice',subtitle:customer.mobile||customer.customerCode||''})}
     <div class="client-hero card card-pad"><div class="client-avatar">${esc((customer.name||'?').trim().charAt(0))}</div><div><strong>${esc(customer.name)}</strong><div class="list-sub">${esc(customer.companyName||'مشتری')} ${customer.mobile?' · '+esc(customer.mobile):''}</div></div></div>
@@ -25,7 +26,7 @@ export async function renderCustomerDetail(App, params) {
     ${credit>0?`<div class="btn-row mt-3"><span class="badge badge-paid">بستانکاری: ${money(credit)}</span>${unallocated>0&&openList.length?`<button class="btn btn-secondary" id="allocate-credit">تخصیص بستانکاری به فاکتور</button>`:''}<button class="btn btn-ghost" id="refund-customer">${icon('wallet','')}برگشت وجه</button></div>`:''}
     <div class="section-title-row"><div class="section-title-compact">${showOpen?'فاکتورهای باز':'فاکتورهای مشتری'}</div></div>
     <div id="statement" class="statement-page"><div class="client-invoice-list">${(showOpen?openList.map(x=>x.invoice):custInvoices).length?(showOpen?openList.map(x=>x.invoice):custInvoices).map(i=>`<button class="client-invoice-card" data-invoice="${i.id}"><span class="statement-icon">${icon('file-text','')}</span><span><strong>فاکتور ${esc(i.number)}</strong><small>${dateFa(i.date||i.createdAt)} · ${faLabel(INVOICE_STATUS_LABELS,i.status)}</small></span><b>${money(i.total)}${showOpen?`<small class="stat-meta"> مانده ${money(invoiceSnapshot(i,transactions,allocations).remaining)}</small>`:''}</b></button>`).join(''):emptyState(showOpen?'فاکتور بازی وجود ندارد':'فاکتوری ندارد','هنوز فاکتوری برای این مشتری ثبت نشده است.','فاکتور جدید','empty-invoice')}</div>
-    <div class="section-title-row"><div class="section-title-compact">گردش حساب</div><span class="badge badge-${balance>0?'unpaid':'paid'}">${balance>0?'مانده بدهی':'تسویه'}</span></div>
+    <div class="section-title-row"><div class="section-title-compact">پروژه‌های مشتری</div><span class="badge badge-muted">${num(custProjects.length)}</span></div><div class="report-list customer-projects">${custProjects.map(p=>`<button class="report-row report-row-button" data-project="${p.id}"><span class="report-row-icon">${icon('folder','')}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.status||'فعال')}${p.startDate?' · شروع '+dateFa(p.startDate):''}</small></span><b>${p.budget?money(p.budget):'—'}</b></button>`).join('')||'<div class="empty">پروژه‌ای برای این مشتری ثبت نشده است.</div>'}</div><div class="section-title-row"><div class="section-title-compact">گردش حساب</div><span class="badge badge-${balance>0?'unpaid':'paid'}">${balance>0?'مانده بدهی':'تسویه'}</span></div>
     <div class="ledger-list">${ledger.length?ledger.map(r=>`<article class="ledger-card"><div class="ledger-top"><span class="ledger-kind ${r.kind==='invoice'||r.kind==='refund'?'debit':'credit'}">${icon(r.kind==='invoice'?'file-text':'wallet','')} ${r.kind==='invoice'?'فاکتور':r.kind==='refund'?'برگشت وجه':'دریافت'}</span><time>${dateFa(r.date)}</time></div><div class="ledger-body"><strong>${esc(r.desc)}</strong><span class="ledger-amount ${r.debit?'red':'green'}">${r.debit?money(r.debit):money(r.credit)}</span></div><div class="ledger-bottom"><span>مانده</span><b class="${r.balance>=0?'red':'green'}">${money(Math.abs(r.balance))} ${r.balance>=0?'بدهکار':'بستانکار'}</b></div></article>`).join(''):'<div class="empty">گردش حسابی ثبت نشده است.</div>'}</div></div>`);
   document.querySelector('[data-back]')?.addEventListener('click',()=>history.length>1?history.back():navigate('#/customers'));
   document.getElementById('new-customer-invoice').onclick=()=>navigate('#/invoices/new/'+id);
@@ -39,5 +40,6 @@ export async function renderCustomerDetail(App, params) {
   document.getElementById('allocate-credit')?.addEventListener('click',()=>openAllocateCreditModal({customerId:id,onDone:refresh}));
   document.getElementById('refund-customer')?.addEventListener('click',()=>openRefundModal({customerId:id,onDone:refresh}));
   document.querySelectorAll('[data-invoice]').forEach(b=>b.onclick=()=>navigate('#/invoices/'+b.dataset.invoice));
+  document.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>navigate('#/projects/'+b.dataset.project));
   document.querySelectorAll('[data-route]').forEach(b=>b.onclick=e=>{e.preventDefault();navigate(b.dataset.route)});
 }

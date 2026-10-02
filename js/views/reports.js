@@ -1,9 +1,10 @@
 import { DB } from '../db.js';
-import { money, num, dateFa, esc, INVOICE_STATUS_LABELS, faLabel, icon } from '../utils.js';
+import { money, num, dateFa, esc, INVOICE_STATUS_LABELS, faLabel, icon, todayISO } from '../utils.js';
 import { isExpenseType, buildCustomerLedger, invoiceSnapshot, receiptEvents, refundEvents, effectiveTimestamp, inDateRange, safeAmount, projectFinancials, paymentAllocatedAmount, paymentUnallocated, isArchived } from '../finance.js';
 import { stockReport, MOVEMENT_SOURCES, MOVEMENT_SOURCE_LABELS } from '../inventory.js';
 import { INVOICE_STATUS } from '../validators.js';
 import { pageHeader } from '../components.js';
+import { dashboardMetrics, buildActivityFeed } from '../dashboard-metrics.js';
 import { navigate } from '../router.js';
 
 // Date filtering always uses the record's own event date (transaction/invoice `date`; legacy rows fall back to createdAt).
@@ -11,7 +12,7 @@ function filterRow(rec, customerId, status, from, to, rowCustomerId, rowStatus){
 const dt=rec=>effectiveTimestamp(rec)||0;
 const reportDefs=[
   ['sales','chart','فروش','فاکتورها، فروش، دریافت و مطالبات'],['income','wallet','درآمد','دریافت‌های ثبت‌شده'],['expense','wallet','هزینه','هزینه‌ها و پرداخت‌ها'],['debtors','users','بدهکاران','مشتریانی که مانده بدهی دارند'],['invoices','file-text','فاکتورها','جستجو و فیلتر فاکتورها'],['customer','users','صورتحساب مشتری','گردش حساب و مانده یک مشتری'],
-  ['projects','folder','پروژه‌ها','فروش، دریافت، هزینه و سود تقریبی'],['inventory','box','موجودی و حرکت کالا','دفتر موجودی انبار'],['allocations','wallet','تخصیص و برگشت وجه','بستانکاری، تخصیص دریافت‌ها و برگشت‌ها']
+  ['projects','folder','پروژه‌ها','فروش، دریافت، هزینه و سود تقریبی'],['inventory','box','موجودی و حرکت کالا','دفتر موجودی انبار'],['allocations','wallet','تخصیص و برگشت وجه','بستانکاری، تخصیص دریافت‌ها و برگشت‌ها'],['overview','chart','خلاصه مالی','فروش، دریافت، هزینه، سود و مطالبات'],['activity','file-text','گردش فعالیت','تمام رویدادهای مالی به ترتیب تاریخ']
 ];
 export async function renderReports(App, params={}){
   const [customers,invoices,transactions,allocations,movements,products,projects]=await Promise.all([DB.all('customers'),DB.all('invoices'),DB.all('transactions'),DB.all('paymentAllocations'),DB.all('stockMovements'),DB.all('products'),DB.all('projects')]);
@@ -19,7 +20,7 @@ export async function renderReports(App, params={}){
   const grid=document.querySelector('.reports-grid');
   const area=()=>document.getElementById('report-area');
   document.querySelectorAll('[data-report]').forEach(b=>b.onclick=()=>openReport(b.dataset.report));
-  const filterBar=(withStatus=true)=>`<div class="report-toolbar card card-pad"><div class="report-toolbar-head"><div><strong>فیلتر گزارش</strong><small>بازه زمانی و طرف حساب را مشخص کنید.</small></div><button class="btn btn-ghost btn-icon" id="clear-filter">${icon('x','')}</button></div><div class="form-grid"><div class="field"><label>از تاریخ</label><input type="date" id="f-from"></div><div class="field"><label>تا تاریخ</label><input type="date" id="f-to"></div><div class="field"><label>مشتری</label><select id="f-customer"><option value="">همه مشتریان</option>${customers.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>${withStatus?`<div class="field"><label>وضعیت</label><select id="f-status"><option value="">همه وضعیت‌ها</option>${INVOICE_STATUS.map(s=>`<option value="${s}">${faLabel(INVOICE_STATUS_LABELS,s)}</option>`).join('')}</select></div>`:''}<div class="field full"><button class="btn btn-primary btn-block" id="apply-filter">${icon('search','')}نمایش گزارش</button></div></div></div><div id="filtered-out"></div>`;
+  const filterBar=(withStatus=true)=>`<div class="report-toolbar card card-pad"><div class="report-toolbar-head"><div><strong>فیلتر گزارش</strong><small>بازه زمانی و طرف حساب را مشخص کنید.</small></div><button class="btn btn-ghost btn-icon" id="clear-filter">${icon('x','')}</button></div><div class="report-presets"><button type="button" class="filter-chip" data-preset="month">این ماه</button><button type="button" class="filter-chip" data-preset="prev">ماه قبل</button><button type="button" class="filter-chip" data-preset="30">۳۰ روز اخیر</button><button type="button" class="filter-chip" data-preset="all">همه</button></div><div class="form-grid"><div class="field"><label>از تاریخ</label><input type="date" id="f-from"></div><div class="field"><label>تا تاریخ</label><input type="date" id="f-to"></div><div class="field"><label>مشتری</label><select id="f-customer"><option value="">همه مشتریان</option>${customers.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>${withStatus?`<div class="field"><label>وضعیت</label><select id="f-status"><option value="">همه وضعیت‌ها</option>${INVOICE_STATUS.map(s=>`<option value="${s}">${faLabel(INVOICE_STATUS_LABELS,s)}</option>`).join('')}</select></div>`:''}<div class="field full"><button class="btn btn-primary btn-block" id="apply-filter">${icon('search','')}نمایش گزارش</button></div></div></div><div id="filtered-out"></div>`;
   const readFilters=()=>({from:document.getElementById('f-from')?.value,to:document.getElementById('f-to')?.value,customerId:document.getElementById('f-customer')?.value,status:document.getElementById('f-status')?.value});
   function openReport(type){
     grid.hidden=true;
@@ -28,7 +29,10 @@ export async function renderReports(App, params={}){
     if(type==='projects'){projectsReport();return;}
     if(type==='inventory'){inventoryReport();return;}
     if(type==='allocations'){allocationsReport();return;}
+    if(type==='overview'){overviewReport();return;}
+    if(type==='activity'){activityReport();return;}
     area().innerHTML=`<div class="report-view-head"><button class="btn btn-ghost" id="back-report">${icon('arrow-right','')}گزارش‌ها</button><div><h2>${reportDefs.find(x=>x[0]===type)?.[2]||'گزارش'}</h2><small>فیلتر و جزئیات گزارش</small></div></div>`+filterBar(type!=='income'&&type!=='expense');
+    document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{const now=new Date();const fmt=d=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;};const k=b.dataset.preset;let from='',to=fmt(now);if(k==='month')from=fmt(new Date(now.getFullYear(),now.getMonth(),1));else if(k==='prev'){from=fmt(new Date(now.getFullYear(),now.getMonth()-1,1));to=fmt(new Date(now.getFullYear(),now.getMonth(),0));}else if(k==='30'){const d=new Date(now);d.setDate(d.getDate()-29);from=fmt(d);}document.getElementById('f-from').value=from;document.getElementById('f-to').value=to;document.getElementById('apply-filter').click();});
     document.getElementById('apply-filter').onclick=()=>{const f=readFilters(); if(type==='sales')salesReport(f);else if(type==='income')incomeExpenseReport(f,true);else if(type==='expense')incomeExpenseReport(f,false);else invoicesReport(f);};
     document.getElementById('back-report').onclick=()=>showReportHome();
     document.getElementById('clear-filter').onclick=()=>openReport(type);
@@ -85,6 +89,29 @@ export async function renderReports(App, params={}){
     const refunds=refundEvents(invoices,transactions).sort((a,b)=>(b.date||0)-(a.date||0));
     area().innerHTML=head('تخصیص و برگشت وجه','بستانکاری، تخصیص دریافت‌ها و برگشت‌ها')+summaryCards([['دریافت‌های بدون فاکتور',num(onAccount.length)],['بستانکاری تخصیص‌نیافته',money(unalloc),'green'],['مجموع برگشت وجه',money(refunds.reduce((s,e)=>s+e.amount,0)),'red']])+`<div class="section-title">دریافت‌های بدون فاکتور</div><div class="report-list" id="alloc-list">${onAccount.map(t=>`<article class="report-row"><span><strong>${esc(cname(t.customerId))} · ${esc(t.description||'دریافت وجه')}</strong><small>${dateFa(t.date||t.createdAt)} · تخصیص‌یافته ${money(paymentAllocatedAmount(t.id,allocations))} · تخصیص‌نیافته ${money(paymentUnallocated(t,allocations))}</small></span><b class="green">${money(t.amount)}</b></article>`).join('')||'<div class="empty">موردی نیست.</div>'}</div><div class="section-title">برگشت وجه‌ها</div><div class="report-list" id="refund-list">${refunds.map(e=>`<article class="report-row"><span><strong>${esc(cname(e.customerId))} · ${esc(e.description||'برگشت وجه')}</strong><small>${dateFa(e.date)}${e.invoiceId?' · فاکتور مرتبط':''}</small></span><b class="red">− ${money(e.amount)}</b></article>`).join('')||'<div class="empty">برگشت وجهی ثبت نشده است.</div>'}</div>`;
     document.getElementById('back-report').onclick=()=>showReportHome();
+  }
+
+  function overviewReport(){
+    area().innerHTML=`${head('خلاصه مالی','نمای کلی برای تصمیم‌گیری روزانه')}<div class="report-toolbar card card-pad"><div class="report-presets"><button type="button" class="filter-chip active" data-overview="month">این ماه</button><button type="button" class="filter-chip" data-overview="30">۳۰ روز اخیر</button><button type="button" class="filter-chip" data-overview="all">همه</button></div><div class="form-grid"><div class="field"><label>از تاریخ</label><input type="date" id="ov-from"></div><div class="field"><label>تا تاریخ</label><input type="date" id="ov-to" value="${todayISO()}"></div></div></div><div id="overview-out"></div>`;
+    const draw=()=>{
+      const from=document.getElementById('ov-from').value,to=document.getElementById('ov-to').value;
+      const inRange=x=>{const ts=effectiveTimestamp(x);if(!Number.isFinite(ts))return false;const d=new Date(ts);const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return (!from||k>=from)&&(!to||k<=to);};
+      const sales=invoices.filter(i=>i.status!=='cancelled'&&inRange(i)).reduce((s,i)=>s+safeAmount(i.total),0);
+      const receipts=receiptEvents(invoices,transactions,allocations).filter(e=>e.kind==='customer_payment'&&inRange({date:e.date})).reduce((s,e)=>s+e.amount,0);
+      const refunds=refundEvents(invoices,transactions).filter(e=>inRange({date:e.date})).reduce((s,e)=>s+e.amount,0);
+      const expenses=transactions.filter(t=>isExpenseType(t.type)&&inRange(t)).reduce((s,t)=>s+safeAmount(t.amount),0);
+      const current=dashboardMetrics({today:todayISO(),invoices,transactions,customers,allocations,products,projects,movements});
+      const profit=sales-expenses;
+      document.getElementById('overview-out').innerHTML=summaryCards([['فروش',money(sales)],['دریافت ناخالص',money(receipts),'green'],['برگشت وجه',money(refunds),'red'],['دریافت خالص',money(receipts-refunds),'green'],['هزینه',money(expenses),'red'],['سود تقریبی',money(profit),profit>=0?'green':'red'],['مطالبات فعلی',money(current.receivables),'red'],['فاکتورهای باز',num(current.openInvoiceCount)]]);
+    };
+    const setPreset=k=>{const now=new Date(),fmt=d=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;};let from='',to=fmt(now);if(k==='month')from=fmt(new Date(now.getFullYear(),now.getMonth(),1));else if(k==='30'){const d=new Date(now);d.setDate(d.getDate()-29);from=fmt(d);}document.getElementById('ov-from').value=from;document.getElementById('ov-to').value=to;draw();};
+    document.getElementById('back-report').onclick=()=>showReportHome();document.getElementById('ov-from').onchange=draw;document.getElementById('ov-to').onchange=draw;document.querySelectorAll('[data-overview]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-overview]').forEach(x=>x.classList.toggle('active',x===b));setPreset(b.dataset.overview);});setPreset('month');
+  }
+  function activityReport(){
+    const feed=buildActivityFeed({invoices,transactions,limit:1000});
+    area().innerHTML=head('گردش فعالیت','فاکتور، دریافت، هزینه و برگشت وجه به ترتیب تاریخ')+`<div class="report-toolbar card card-pad"><div class="form-grid"><div class="field"><label>از تاریخ</label><input type="date" id="act-from"></div><div class="field"><label>تا تاریخ</label><input type="date" id="act-to"></div><div class="field full"><button class="btn btn-primary btn-block" id="act-apply">${icon('search','')}نمایش</button></div></div></div><div id="act-out"></div>`;
+    const draw=()=>{const from=document.getElementById('act-from').value,to=document.getElementById('act-to').value;const rows=feed.filter(x=>{if(!x.date)return false;const d=new Date(x.date),k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return (!from||k>=from)&&(!to||k<=to);});document.getElementById('act-out').innerHTML=summaryCards([['تعداد رویداد',num(rows.length)],['ورودی نقدی',money(rows.filter(x=>x.kind==='receipt').reduce((s,x)=>s+x.amount,0)),'green'],['هزینه/برگشت',money(rows.filter(x=>x.kind==='expense'||x.kind==='refund').reduce((s,x)=>s+x.amount,0)),'red']])+`<div class="report-list">${rows.map(x=>`<button class="report-row report-row-button" ${x.kind==='invoice'&&x.refId?`data-invoice="${x.refId}"`:''}><span class="report-row-icon">${icon(x.kind==='invoice'?'file-text':x.kind==='expense'?'wallet':'wallet','')}</span><span><strong>${esc(x.title)}</strong><small>${esc(x.detail||'')}${x.date?' · '+dateFa(x.date):''}</small></span><b class="${x.kind==='expense'||x.kind==='refund'?'red':'green'}">${x.kind==='expense'||x.kind==='refund'?'− ':'+ '}${money(x.amount)}</b></button>`).join('')||'<div class="empty">رویدادی پیدا نشد.</div>'}</div>`;bindInvoiceRows();};
+    document.getElementById('back-report').onclick=()=>showReportHome();document.getElementById('act-apply').onclick=draw;draw();
   }
   function showReportHome(){grid.hidden=false;area().innerHTML='';window.scrollTo(0,0);}
   const initial=params.query?.get('type'); if(initial)openReport(initial);
