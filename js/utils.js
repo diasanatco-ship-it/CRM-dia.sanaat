@@ -14,10 +14,15 @@ export const formatAmountInput=value=>{
 export function bindAmountInput(input, options={}){
   if(!input) return;
   const allowDecimal=options.allowDecimal!==false;
+  // whole-number (Rial) fields get the digits-only keypad, so there is no "." key to mis-type on iOS
+  if(!allowDecimal) input.setAttribute('inputmode','numeric');
   const format=()=>{
     // one central normalizer: Persian/Arabic digits, ٬ ، , separators and the Arabic decimal mark ٫ (which must stay a decimal point)
     const raw=normalizeAmountInput(input.value);
     if(!raw) return;
+    // whole-number fields "1000.5" used to be glued into 10005 (10x too much)
+    // (kept visible, never merged, so the validators can reject it instead of the amount silently changing)
+    if(!allowDecimal&&raw.includes('.')){input.value=raw.replace(/[^0-9.]/g,'');return;}
     const clean=allowDecimal?raw.replace(/[^0-9.]/g,''):raw.replace(/\D/g,'');
     const parts=clean.split('.');
     const integer=parts[0]||'0';
